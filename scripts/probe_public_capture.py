@@ -30,13 +30,24 @@ def owned_run(path, serial, proc_root=Path('/proc')):
         raise ValueError("Not an isolated diagnostic AVD")
 
 
+def validate_checked_pair(previous, current):
+    if not isinstance(previous.get("frame_ref"), str) or not previous["frame_ref"]:
+        raise ValueError("Missing original observation")
+    if current.get("based_on_frame_ref") != previous["frame_ref"]:
+        raise ValueError("Image did not bind its original observation")
+    for key in ("foreground_package", "width", "height", "rotation", "hierarchy_xml"):
+        if key not in previous or key not in current or current[key] != previous[key]:
+            raise ValueError("Observed page changed before checked capture")
+
+
 async def probe(args):
     from kengent.tools.resource_node.android import AdbTransport, NativeSession, _snapshot_hierarchy, _snapshot_image
     owned_run(args.run_dir, args.serial)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     events = []
     receipt = {"public_only": True, "production_cutover": False, "account_input": False,
-               "package": args.package, "timing_profile": "arm-emulator", "events": events}
+               "package": args.package, "timing_profile": "arm-emulator", "events": events,
+               "checked_capture": args.checked}
     session = None
     started = time.monotonic()
     phase = "identify"
@@ -59,23 +70,37 @@ async def probe(args):
             session = NativeSession(transport, context, [args.package])
             await session.start(context)
             event({"phase": phase, "ok": True, "seconds": round(time.monotonic() - started, 3)})
-            for index in range(args.count):
+            async def capture_snapshot(name, options, previous=None):
+                nonlocal phase
                 owned_run(args.run_dir, args.serial)
-                phase = f"snapshot_{index + 1}"
+                phase = name
                 tick = time.monotonic()
-                options = {"include_image": True, "include_xml": True, "image_format": "jpeg"}
+                (args.output / f"{phase}.request.json").write_text(json.dumps(options) + "\n")
                 raw = await session.call("android.snapshot", {"arguments": options})
                 # Keep the ORIGINAL wire receipt privately for offline backend validation.
                 (args.output / f"{phase}.wire.json").write_text(json.dumps(raw) + "\n")
                 result = dict(raw)
                 _snapshot_hierarchy(result, options)
-                data, _ = _snapshot_image(result.pop("image_base64"), result, "jpeg")
+                if previous is not None:
+                    validate_checked_pair(previous, raw)
+                if options["include_image"]:
+                    data, _ = _snapshot_image(result.pop("image_base64"), result, "jpeg")
+                    (args.output / f"{phase}.jpg").write_bytes(data)
                 if result["foreground_package"] != args.package:
                     raise ValueError("Captured foreground is not the intended public App")
-                (args.output / f"{phase}.jpg").write_bytes(data)
                 event({"phase": phase, "ok": True, "seconds": round(time.monotonic() - tick, 3),
                        "capture_delay_ms": result.get("capture_delay_ms"),
                        "timings": result.get("snapshot_timings")})
+                return raw
+            for index in range(args.count):
+                options = {"include_image": True, "include_xml": True, "image_format": "jpeg"}
+                if args.checked:
+                    previous = await capture_snapshot(f"snapshot_{index+1}_observe",
+                        {"include_image":False,"include_xml":True})
+                    options["expected_frame_ref"] = previous["frame_ref"]
+                    await capture_snapshot(f"snapshot_{index+1}_checked", options, previous)
+                else:
+                    await capture_snapshot(f"snapshot_{index+1}", options)
                 if index + 1 < args.count:
                     await asyncio.sleep(1)
     except BaseException as error:
@@ -94,7 +119,7 @@ async def probe(args):
                 receipt["cleanup_confirmed"] = False
                 receipt["cleanup_error_type"] = type(error).__name__
         receipt["elapsed_seconds"] = round(time.monotonic() - started, 3)
-        receipt["passed"] = (len([e for e in events if e["phase"].startswith("snapshot_") and e["ok"]]) == args.count
+        receipt["passed"] = (len([e for e in events if e["phase"].startswith("snapshot_") and e["ok"]]) == args.count * (2 if args.checked else 1)
                              and receipt.get("cleanup_confirmed") is True)
         (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print(json.dumps({"passed": receipt["passed"], "cleanup_confirmed": receipt.get("cleanup_confirmed"),
@@ -112,6 +137,7 @@ def main():
     parser.add_argument("--serial", default="emulator-5576")
     parser.add_argument("--package", choices=("com.tdx.AndroidNew", "com.guotai.dazhihui"), required=True)
     parser.add_argument("--count", type=int, choices=range(1, 7), default=3)
+    parser.add_argument("--checked", action="store_true", help="Observe XML then capture the exact same frame, as Stock does")
     args = parser.parse_args()
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))
     os.umask(0o077)

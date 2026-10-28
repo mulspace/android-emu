@@ -5,7 +5,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from probe_public_capture import owned_run
+from probe_public_capture import owned_run, validate_checked_pair
+from validate_capture_receipts import retained_options
 
 
 class OwnedCaptureTests(unittest.TestCase):
@@ -31,6 +32,62 @@ class OwnedCaptureTests(unittest.TestCase):
                 else:
                     with self.assertRaises((ValueError, FileNotFoundError)):
                         owned_run(run, serial, proc)
+
+
+class CheckedCaptureTests(unittest.TestCase):
+    def setUp(self):
+        self.observed = {'frame_ref': 'frame-1', 'foreground_package': 'example.app',
+                         'width': 720, 'height': 1280, 'rotation': 0,
+                         'hierarchy_xml': '<hierarchy><node text="quote"/></hierarchy>'}
+        self.captured = dict(self.observed, frame_ref='frame-2', based_on_frame_ref='frame-1')
+
+    def test_image_is_bound_to_exact_observation(self):
+        validate_checked_pair(self.observed, self.captured)
+
+    def test_changed_or_missing_evidence_is_rejected(self):
+        for key, changed in [('based_on_frame_ref', 'frame-old'),
+                             ('foreground_package', 'android'), ('width', 1080),
+                             ('height', 1920), ('rotation', 1),
+                             ('hierarchy_xml', '<hierarchy/>')]:
+            for missing in (True, False):
+                with self.subTest(key=key, missing=missing):
+                    candidate = dict(self.captured)
+                    if missing:
+                        candidate.pop(key)
+                    else:
+                        candidate[key] = changed
+                    with self.assertRaises(ValueError):
+                        validate_checked_pair(self.observed, candidate)
+
+    def test_missing_observation_reference_is_rejected(self):
+        for reference in (None, '', 42):
+            with self.subTest(reference=reference), self.assertRaises(ValueError):
+                validate_checked_pair(dict(self.observed, frame_ref=reference), self.captured)
+
+    def test_replay_uses_original_request_and_checks_pair(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            observe_options = {'include_image': False, 'include_xml': True}
+            (root / 'snapshot_1_observe.request.json').write_text(json.dumps(observe_options))
+            self.assertEqual(retained_options(root, 'snapshot_1_observe', self.observed), observe_options)
+            (root / 'snapshot_1_observe.wire.json').write_text(json.dumps(self.observed))
+            options = {'include_image': True, 'include_xml': True, 'image_format': 'jpeg',
+                       'expected_frame_ref': 'frame-1'}
+            (root / 'snapshot_1_checked.request.json').write_text(json.dumps(options))
+            self.assertEqual(retained_options(root, 'snapshot_1_checked', self.captured), options)
+            options['expected_frame_ref'] = 'old-frame'
+            (root / 'snapshot_1_checked.request.json').write_text(json.dumps(options))
+            with self.assertRaises(ValueError):
+                retained_options(root, 'snapshot_1_checked', self.captured)
+
+    def test_legacy_receipt_supported_but_checked_requests_cannot_be_guessed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(retained_options(root, 'snapshot_1', {}),
+                             {'include_image': True, 'include_xml': True, 'image_format': 'jpeg'})
+            for suffix in ('observe', 'checked'):
+                with self.subTest(suffix=suffix), self.assertRaises(ValueError):
+                    retained_options(root, 'snapshot_1_' + suffix, {})
 
 
 if __name__ == '__main__':

@@ -290,3 +290,61 @@ account readiness. Authenticated funds and complete holdings remain untested:
 this terminal has no managed tenant-app adapter/current request Context. Existing
 login consent does not supply that missing trusted transport. Do not switch Stock
 to this emulator until the real managed account acceptance succeeds.
+
+## Native cold launch, strict capture and remaining broker ANR
+
+The next isolated run exercised `android.start_app` rather than preparing the
+screen with a separate launcher. The original bridge submitted one Junhong launch
+but failed `foreground_confirmation` at its three-second bound; its generation
+was cleaned up and that request was not replayed.
+
+The opt-in emulator candidate now awaits only foreground confirmation for up to
+120 seconds after the same one launch, with a 125-second RPC bound. The standard
+profile retains three-second confirmation/eight-second RPC limits. Tap, text and
+credential RPCs remain at eight seconds. A pure confirmation helper has no launch
+or input primitive and checks the original session fence before/after observations.
+Its tests cover a 93.5-second synthetic startup, timeout, cancellation, a denied
+read, another foreground package and a late response after its deadline.
+
+Stock's typed `DeviceSession` now supplies an explicit 180-second platform budget
+only for `android.start_app`, with a 190-second caller bound; otherwise its former
+45-second caller bound remains. This prevents the platform's default 60 seconds
+or App's default 45 seconds from silently defeating the explicit emulator setting.
+The original context deadline, lease, cancellation and single-intent key still
+apply. No live App service, configuration, binding or schedule was changed.
+
+215 Python/JVM focused cases and all 20 Rust `device_targets` cases passed. The
+incremental patch/source hashes are
+[`kengent-arm-emulator-launch.patch`](../integration/kengent-arm-emulator-launch.patch).
+Its exact-preimage apply check passed. The live candidate bridge SHA-256 was
+`ad1d7100c04aa9365fe824f20b3305d5c1c856b4292cef0743f287a7bd3ab29f`.
+
+The corrected launch acknowledged in 13.316 seconds. The immediately following
+snapshot still exceeded 30 seconds. A later strict observe-then-image probe was
+correctly rejected because Android's Junhong ANR dialog was in front. Event logs
+recorded `AppwidgetUpdateService` ANR at 02:30:53. The retained main-thread stack
+was in `BinderProxy.transactNative -> sendAccessibilityEvent` during fragment
+layout. Process-cumulative counters showed about 10.88 seconds executing, 24.95
+seconds queued and 49.46 seconds aggregate JIT compilation work. Those counters
+do not by themselves prove the cause or the duration of the blocked Binder call.
+
+The guest's supported `cmd package compile -m speed -f com.guotai.dazhihui`
+returned Success in 14.689 seconds. This is normal Android compilation of caches,
+not an APK/signature change or disabled app check; see the
+[AOSP Android 7 JIT/compilation guide](https://android.googlesource.com/platform/docs/source.android.com/+/4a5bcd6fa800faafbe7272d39266e21dc26edf39/en/devices/tech/dalvik/jit-compiler.html).
+The subsequent separate launch acknowledged in 16.121 seconds, but the snapshot
+again timed out and a second service ANR appeared at 02:40:07. Precompilation did
+**not** pass acceptance. The final trace copy lacked the broker's own section;
+the second ANR is supported by its event and screenshot, not a complete second
+broker stack. The isolated AVD now contains this speed-mode cache experiment.
+
+This 1185.42-second run ended via its owned stop request, exit 0. Debugger,
+emulator, test processes and dedicated ports were checked released. Private
+screens/ANR traces were not committed. No ANR dialog was clicked or bypassed.
+
+Next evidence needed: compare cold startup without an attached UiAutomation
+until the public main page is displayed, then use Stock's strict XML-observation
+plus `expected_frame_ref` image path. The repeated ANR while accessibility was
+attached is a hypothesis to test, not an established causal diagnosis. Warm
+unbound screenshots alone remain insufficient. Full managed funds/holdings and
+production Stock replacement have still not passed.

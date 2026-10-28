@@ -1,0 +1,37 @@
+{
+  "scope": "incremental on cleanup candidate; foreground acknowledgement is not app page readiness; no production cutover",
+  "files": {
+    "external/apps/stock/src/domain/device.rs": {
+      "preimage_sha256": "42a72238828516cede67a6d929e4c4badd658db5eaae6abea4cdb802caa14a72",
+      "postimage_sha256": "9794c7ef6e9611d5b25d271d86ed470e82fb0bbb8ad72de8bc3b9b369bfd6da2"
+    },
+    "external/apps/stock/tests/support/mobile.rs": {
+      "preimage_sha256": "5f8a56ae769cf9dd3eaadd3ba96d3597e832833ac3fbfb14f74145e63c4aaffb",
+      "postimage_sha256": "0c1d637a29f5e53c982343ea50831e0a1baf080ff54203de2e7dcb744e1d55ba"
+    },
+    "src/kengent/tools/resource_node/android.py": {
+      "preimage_sha256": "c6b616b5af18ecb05f87a98f682cf3ac017e8b4a76280e9e3d4deeb17fcae072",
+      "postimage_sha256": "6142f46b613162eda3f26d6b6d31a10457f7705ac46a0689d085ffca0cb7de79"
+    },
+    "src/kengent/tools/resource_node/android_timing.py": {
+      "preimage_sha256": "4c9b328f26df071c3f74400ebe01dc876276e8bbc2fc15b94dfd8b08cc246068",
+      "postimage_sha256": "842a432de0e621c576ef29bfe0f8ab994b52546c4a532dd910e3e1f4aaf2a5ff"
+    },
+    "src/kengent/tools/resource_node/native/LaunchReadiness.java": {
+      "preimage_sha256": null,
+      "postimage_sha256": "7631818ae287c9541bd9519e3d4b260664474f92748966945e46a8bb56ccd73e"
+    },
+    "src/kengent/tools/resource_node/native/ResourceDeviceBridge.java": {
+      "preimage_sha256": "cfd1ccac7c8eb572997fb62b9cc0d53308ca7afea9921c09033a0af1f8c56906",
+      "postimage_sha256": "39bdad31a234691bba741ef72426b25ebca5d91b88a0b657a34c342b904c211e"
+    },
+    "tests/platform_services/test_resource_android_timing.py": {
+      "preimage_sha256": "300306f05e9d7bef891482da10a7d1e9f04c03ebbde495dcd1ec0b6a38da0a45",
+      "postimage_sha256": "e97cf2119ba87ea46617cc57de3ed317a66cbe5e8a46a02915a442ec4d2de539"
+    },
+    "tests/platform_services/test_resource_launch_readiness.py": {
+      "preimage_sha256": null,
+      "postimage_sha256": "c41a85c80d90bd3665f1d2898c3044c679ca28f9a0aefd19c7d3a1d7b36f2b97"
+    }
+  }
+}

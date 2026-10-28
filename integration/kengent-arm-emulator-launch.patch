@@ -1,0 +1,304 @@
+--- a/external/apps/stock/src/domain/device.rs
++++ b/external/apps/stock/src/domain/device.rs
+@@ -210,10 +210,19 @@
+         operation.lease_id = Some(self.lease.lease_id.clone());
+         operation.generation = Some(self.lease.generation);
+         operation.resource_revision = Some(self.lease.resource.revision);
++        // Cold emulators can acknowledge the submitted launch after a long
++        // read-only foreground wait. Carry that budget through both layers;
++        // the host still bounds physical input and cancellation/lease fences.
++        let call_timeout = if name == "android.start_app" {
++            operation.timeout_seconds = Some(180);
++            190
++        } else {
++            45
++        };
+         let result = guarded(
+             &self.targets.context,
+             &self.targets.cancel,
+-            45,
++            call_timeout,
+             self.targets.platform.invoke(
+                 &self.targets.context,
+                 key,
+--- a/external/apps/stock/tests/support/mobile.rs
++++ b/external/apps/stock/tests/support/mobile.rs
+@@ -378,6 +378,7 @@
+         assert_eq!(operation.generation, Some(1));
+         let args = operation.arguments;
+         if operation.operation == "android.start_app" {
++            assert_eq!(operation.timeout_seconds, Some(180), "Launch wait must reach the platform without its default 60-second cutoff");
+             self.app = args["package"].as_str().unwrap().into();
+             if self.app == TONGDAXIN {
+                 self.page = "home".into();
+--- a/src/kengent/tools/resource_node/android.py
++++ b/src/kengent/tools/resource_node/android.py
+@@ -822,9 +822,10 @@
+                         "native_request_too_large",
+                         "Native request exceeds the private transport bound",
+                     )
+-                # A slower read never extends input/credential submission waits
+-                # and remains bounded by ResourceNode's lease/request deadline.
+-                timeout = self.timing.snapshot_seconds if operation == "android.snapshot" else 8
++                # Emulator startup may wait for the already-submitted launch;
++                # tap/text/credential deadlines and all lease fences stay intact.
++                timeout = (self.timing.snapshot_seconds if operation == "android.snapshot" else
++                           self.timing.launch_seconds if operation == "android.start_app" else 8)
+                 async with asyncio.timeout(timeout):
+                     self.process.stdin.write(raw)
+                     await self.process.stdin.drain()
+@@ -875,10 +876,10 @@
+                         "native_start_unconfirmed",
+                         "Private native session did not confirm ownership",
+                     )
+-                await self.call(
+-                    "configure",
+-                    {"packages": sorted(self.packages), "ttl_ms": self.ttl(session)},
+-                )
++                configuration = {"packages": sorted(self.packages), "ttl_ms": self.ttl(session)}
++                if self.timing.launch_confirmation_ms != 3000:
++                    configuration["launch_confirmation_ms"] = self.timing.launch_confirmation_ms
++                await self.call("configure", configuration)
+                 if self.timing.settle_seconds:
+                     await asyncio.sleep(self.timing.settle_seconds)
+                     self.ttl(session)
+--- a/src/kengent/tools/resource_node/android_timing.py
++++ b/src/kengent/tools/resource_node/android_timing.py
+@@ -10,6 +10,8 @@
+     snapshot_seconds: int = 8
+     settle_seconds: int = 0
+     cleanup_seconds: int = 6
++    launch_confirmation_ms: int = 3000
++    launch_seconds: int = 8
+ 
+ 
+ def timing_for(serial: str, profile: str = "standard") -> AndroidTiming:
+@@ -17,7 +19,8 @@
+         return AndroidTiming()
+     if profile != "arm-emulator" or not re.fullmatch(r"emulator-[0-9]{4,5}", serial):
+         raise ValueError("Extended Android read timing requires an explicit emulator locator")
+-    return AndroidTiming(identity_seconds=30, snapshot_seconds=30, settle_seconds=2, cleanup_seconds=30)
++    return AndroidTiming(identity_seconds=30, snapshot_seconds=30, settle_seconds=2, cleanup_seconds=30,
++                         launch_confirmation_ms=120000, launch_seconds=125)
+ 
+ 
+ def validate_profiles(profiles: object) -> dict[str, str]:
+--- /dev/null
++++ b/src/kengent/tools/resource_node/native/LaunchReadiness.java
+@@ -0,0 +1,29 @@
++package club.lang.resources;
++
++/** Read-only confirmation of one submitted launch; this class cannot launch or input. */
++public final class LaunchReadiness {
++    private LaunchReadiness() {}
++
++    public interface Port {
++        void check() throws Exception;
++        long now();
++        String foregroundPackage() throws Exception;
++        void pause(long milliseconds) throws Exception;
++    }
++
++    public static void await(Port port, String expectedPackage, int timeoutMs) throws Exception {
++        if (port == null || expectedPackage == null || expectedPackage.isEmpty()
++                || (timeoutMs != 3000 && timeoutMs != 120000)) throw new IllegalArgumentException();
++        long started = port.now();
++        while (port.now() - started < timeoutMs) {
++            port.check();
++            String current = port.foregroundPackage();
++            port.check();
++            long elapsed = port.now() - started;
++            if (elapsed < 0 || elapsed >= timeoutMs) throw new IllegalStateException();
++            if (expectedPackage.equals(current)) return;
++            port.pause(Math.min(timeoutMs == 3000 ? 40 : 250, timeoutMs - elapsed));
++        }
++        throw new IllegalStateException();
++    }
++}
+--- a/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
++++ b/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
+@@ -39,6 +39,7 @@
+     private static String nonce;
+     private static final Set<String> packages = new HashSet<>();
+     private static volatile long deadline;
++    private static int launchConfirmationMs = 3000;
+     private static SessionFence gate;
+     private static String frame, framePackage;
+     private static SnapshotCapture.Observation frameObservation;
+@@ -625,15 +626,15 @@
+                         launch.start();
+                     }
+                     phase = "foreground_confirmation";
+-                    boolean foregroundConfirmed = false;
+-                    long until = SystemClock.elapsedRealtime() + 3000;
+-                    while (SystemClock.elapsedRealtime() < until) {
+-                        alive(); fresh();
+-                        try { if (pkg.equals(foreground())) { foregroundConfirmed = true; break; } }
+-                        catch (IllegalStateException ignored) {}
+-                        SystemClock.sleep(40);
+-                    }
+-                    if (!foregroundConfirmed) throw new IllegalStateException();
++                    LaunchReadiness.await(new LaunchReadiness.Port() {
++                        public void check() throws Exception { alive(); fresh(); }
++                        public long now() { return SystemClock.elapsedRealtime(); }
++                        public String foregroundPackage() {
++                            try { return foreground(); }
++                            catch (IllegalStateException notReady) { return null; }
++                        }
++                        public void pause(long milliseconds) { SystemClock.sleep(milliseconds); }
++                    }, pkg, launchConfirmationMs);
+                 } catch (Throwable error) {
+                     throw new OperationFailure(phase, error);
+                 }
+@@ -825,6 +826,12 @@
+                 if (op.equals("configure")) {
+                     phase = "configure";
+                     if (!packages.isEmpty()) throw new IllegalArgumentException();
++                    if (request.has("launch_confirmation_ms")) {
++                        Object value = request.get("launch_confirmation_ms");
++                        if (!(value instanceof Integer) || ((Integer) value != 3000 && (Integer) value != 120000))
++                            throw new IllegalArgumentException();
++                        launchConfirmationMs = (Integer) value;
++                    }
+                     JSONArray values = request.getJSONArray("packages");
+                     if (values.length() < 1 || values.length() > 50) throw new IllegalArgumentException();
+                     for (int i = 0; i < values.length(); i++) {
+--- a/tests/platform_services/test_resource_android_timing.py
++++ b/tests/platform_services/test_resource_android_timing.py
+@@ -22,10 +22,13 @@
+ def test_default_device_timing_and_explicit_profile():
+     assert timing_for("physical-usb").identity_seconds == 8
+     assert timing_for("physical-usb").cleanup_seconds == 6
++    assert timing_for("physical-usb").launch_seconds == 8
++    assert timing_for("physical-usb").launch_confirmation_ms == 3000
+     assert timing_for("emulator-5576").snapshot_seconds == 8
+     profile = timing_for("emulator-5576", "arm-emulator")
+     assert (profile.identity_seconds, profile.snapshot_seconds, profile.settle_seconds) == (30, 30, 2)
+     assert profile.cleanup_seconds == 30
++    assert (profile.launch_confirmation_ms, profile.launch_seconds) == (120000, 125)
+     with pytest.raises(ValueError):
+         validate_profiles({"emulator-5576": 30})
+ 
+@@ -43,7 +46,7 @@
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_emulator_profile_changes_only_snapshot_rpc_deadline(monkeypatch):
++async def test_emulator_profile_changes_reads_and_launch_wait_not_text_or_credentials(monkeypatch):
+     deadlines = []
+     @asynccontextmanager
+     async def deadline(seconds):
+@@ -61,9 +64,41 @@
+     async def response(*, expected_id=None, private_input=False):
+         return {"id": expected_id, "ok": True, "result": {}}
+     monkeypatch.setattr(session, "_read", response)
+-    for operation in ("android.snapshot", "android.tap", "android.start_app", "android.credential_text"):
++    for operation in ("android.snapshot", "android.tap", "android.start_app", "android.text", "android.credential_text"):
+         await session.call(operation, {"arguments": {}})
+-    assert deadlines == [30, 8, 8, 8]
++    assert deadlines == [30, 8, 125, 8, 8]
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("profile,confirmation", [("standard", None), ("arm-emulator", 120000)])
++async def test_launch_wait_is_host_configured_once_before_any_operation(monkeypatch, profile, confirmation):
++    from datetime import UTC, datetime, timedelta
++    sent = []
++    class Input:
++        def write(self, raw):
++            sent.append(json.loads(raw))
++        async def drain(self):
++            pass
++    process = SimpleNamespace(returncode=None, stdin=Input())
++    async def start(nonce):
++        assert nonce == "a" * 32
++        return process
++    async def settle(seconds):
++        assert seconds == 2
++    transport = SimpleNamespace(timing=timing_for("emulator-5576", profile), start=start)
++    context = {"nonce": "a" * 32, "expires_at": (datetime.now(UTC)+timedelta(seconds=180)).isoformat()}
++    session = android.NativeSession(transport, context, ["example.app"])
++    async def response(*, expected_id=None, private_input=False):
++        if expected_id is None:
++            return {"ready": True, "nonce": context["nonce"], "pid": 123}
++        return {"id": expected_id, "ok": True, "result": {}}
++    monkeypatch.setattr(session, "_read", response)
++    monkeypatch.setattr(android.asyncio, "sleep", settle)
++    await session.start(context)
++    await session.start(context)
++    assert len(sent) == 1 and sent[0]["op"] == "configure"
++    assert sent[0].get("launch_confirmation_ms") == confirmation
++    assert sent[0]["packages"] == ["example.app"]
+ 
+ 
+ @pytest.mark.asyncio
+--- /dev/null
++++ b/tests/platform_services/test_resource_launch_readiness.py
+@@ -0,0 +1,67 @@
++"""One launch can await a slow foreground without replay or bypassing its fence."""
++import shutil
++import subprocess
++from pathlib import Path
++
++import pytest
++
++NATIVE = Path(__file__).resolve().parents[2] / "src/kengent/tools/resource_node/native"
++
++
++@pytest.fixture(scope="module")
++def readiness_classes(tmp_path_factory):
++    if not shutil.which("javac") or not shutil.which("java"):
++        pytest.skip("JDK required")
++    root = tmp_path_factory.mktemp("launch-readiness")
++    probe = root / "Probe.java"
++    probe.write_text('''
++import club.lang.resources.LaunchReadiness;
++public class Probe implements LaunchReadiness.Port {
++    String mode; long clock; int reads, checks;
++    Probe(String mode) { this.mode=mode; }
++    public long now() { return clock; }
++    public void check() { checks++; if (mode.equals("cancel") && clock >= 1000) throw new SecurityException(); }
++    public String foregroundPackage() {
++        reads++;
++        if (mode.equals("denied")) throw new SecurityException();
++        if (mode.equals("slow_read")) { clock=120001; return "expected"; }
++        if (mode.equals("clock_back")) { clock=-1; return "expected"; }
++        if (mode.equals("ready")) return "expected";
++        if (mode.equals("late") && clock >= 93500) return "expected";
++        if (mode.equals("foreign")) return "other.app";
++        return null;
++    }
++    public void pause(long ms) { if (ms<=0 || ms>250) throw new AssertionError(); clock+=ms; }
++    public static void main(String[] args) {
++        Probe p=new Probe(args[0]); String result="ready";
++        try { LaunchReadiness.await(p,"expected",Integer.parseInt(args[1])); }
++        catch (Exception e) { result=e.getClass().getSimpleName(); }
++        System.out.println(result+" time="+p.clock+" reads="+p.reads+" checks="+p.checks);
++    }
++}
++''')
++    subprocess.run(["javac", "-d", str(root), str(NATIVE/"LaunchReadiness.java"), str(probe)],
++                   capture_output=True, check=True, timeout=30)
++    return root
++
++
++@pytest.mark.parametrize("mode,timeout,result,elapsed", [
++    ("ready", 3000, "ready", 0),
++    ("ready", 120000, "ready", 0),
++    ("late", 3000, "IllegalStateException", 3000),
++    ("late", 120000, "ready", 93500),
++    ("missing", 120000, "IllegalStateException", 120000),
++    ("foreign", 3000, "IllegalStateException", 3000),
++    ("cancel", 120000, "SecurityException", 1000),
++    ("denied", 120000, "SecurityException", 0),
++    ("slow_read", 120000, "IllegalStateException", 120001),
++    ("clock_back", 120000, "IllegalStateException", -1),
++    ("ready", 120001, "IllegalArgumentException", 0),
++])
++def test_foreground_confirmation_is_read_only_bounded_and_fenced(readiness_classes, mode, timeout, result, elapsed):
++    completed = subprocess.run(["java", "-cp", str(readiness_classes), "Probe", mode, str(timeout)],
++                               text=True, capture_output=True, check=True, timeout=5)
++    assert completed.stderr == ""
++    assert completed.stdout.startswith(f"{result} time={elapsed} ")
++    if mode in {"ready", "denied", "slow_read", "clock_back"}:
++        assert f"reads={0 if timeout == 120001 else 1} " in completed.stdout
