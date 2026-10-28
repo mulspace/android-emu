@@ -96,6 +96,22 @@ page readiness and guest crashes rather than treating command-return time as
 an application benchmark. Each diagnostic has a deadline; creating `stop.request`
 in its output directory requests an earlier stop.
 
+## Translation-cache diagnostics
+
+`run_debug.py --jit-monitor` creates a QMP Unix socket inside the private run
+folder. `scripts/read_jit_stats.py --run-dir RUN --output NEW_FILE` verifies the
+owned process and sends only `info jit`, preserving cache capacity, translation
+block counts and flush counts. There is no network listener or arbitrary command
+argument. The diagnostic socket is opt-in and ends with the owned emulator.
+
+`--tcg-cache-mb 768` supports an explicit cache comparison without rebuilding or
+changing CPU/MMU semantics. Omitting it preserves upstream sizing. Do not assume
+that the source's 32 MiB static constant is the running default: this system
+emulator uses one quarter of guest RAM, about 384 MiB for this 1536 MiB AVD.
+Capacity is verified through the monitor. See
+[the measured comparison](docs/tcg-cache-diagnostics.md); cache statistics alone
+are not proof of faster or stable App collection.
+
 ## Upstream licensing
 
 The fetched QEMU/Android sources retain their original licenses and notices.

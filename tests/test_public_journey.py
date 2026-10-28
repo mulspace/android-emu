@@ -74,7 +74,10 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
         pending = [frame([node(package=JUNHONG, text="行情", clickable="false",
                     **{"resource-id": JUNHONG + ":id/btm_text2"}),
                     node(package=JUNHONG, **{"resource-id": JUNHONG + ":id/bottom_menu_button2"})], JUNHONG)]
-        market = frame([node(package=JUNHONG, text="自选")], JUNHONG)
+        tab = node(package=JUNHONG, text="行情", selected="false",
+                   **{"resource-id": JUNHONG + ":id/tv_free_stock_market"})
+        pending.append(frame([tab], JUNHONG))
+        market = frame([{**tab, "selected": "true"}], JUNHONG)
         actions = []
         async def capture(phase, options):
             value = deepcopy(pending.pop(0) if pending else market)
@@ -84,7 +87,25 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
         async def action(phase, operation, options):
             actions.append((phase, operation))
         await Journey(JUNHONG, capture, action).navigate()
-        self.assertEqual(actions, [("open_market_once", "android.tap")])
+        self.assertEqual(actions, [("open_market_once", "android.tap"),
+                                   ("open_public_market_once", "android.tap")])
+
+    async def test_broker_does_not_retap_selected_public_market(self):
+        public = frame([node(package=JUNHONG, text="行情", clickable="false",
+                    **{"resource-id": JUNHONG + ":id/btm_text2"}),
+                    node(package=JUNHONG, **{"resource-id": JUNHONG + ":id/bottom_menu_button2"}),
+                    node(package=JUNHONG, text="行情", selected="true",
+                         **{"resource-id": JUNHONG + ":id/tv_free_stock_market"})], JUNHONG)
+        actions = []
+        async def capture(phase, options):
+            result = deepcopy(public)
+            if "expected_frame_ref" in options:
+                result["based_on_frame_ref"] = options["expected_frame_ref"]
+            return result
+        async def action(phase, operation, options):
+            actions.append(phase)
+        await Journey(JUNHONG, capture, action).navigate()
+        self.assertEqual(actions, ["open_market_once"])
 
     async def scenario(self, *, notice=False, failed_action=None, changed_pair=False):
         pending, actions, reads = sequence(notice), [], []

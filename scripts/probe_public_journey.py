@@ -101,8 +101,16 @@ class Journey:
                 and n.get("clickable") == "true") if any(n.get("text") == "行情"
                 and n.get("resource-id") == JUNHONG + ":id/btm_text2" for n in ns) else None)
             await self.tap("open_market_once", frame, chosen)
-            await self.wait("market_ready", lambda ns: unique(ns, lambda n:
-                n.get("text") == "自选" and n.get("clickable") == "true"))
+            def market_tab(ns):
+                return unique(ns, lambda n: n.get("resource-id") == JUNHONG + ":id/tv_free_stock_market"
+                    and n.get("text") == "行情" and n.get("clickable") == "true")
+            frame, chosen = await self.wait("public_market_tab", market_tab)
+            if chosen.get("selected") != "true":
+                await self.tap("open_public_market_once", frame, chosen)
+            def selected_market(ns):
+                tab = market_tab(ns)
+                return tab if tab and tab.get("selected") == "true" else None
+            await self.wait("market_ready", selected_market)
         elif self.package == TDX:
             frame, chosen = await self.wait("market_ready", tdx_search)
             await self.tap("open_search_once", frame, chosen)
@@ -148,16 +156,17 @@ async def probe(args):
     receipt = {"public_only": True, "production_cutover": False, "account_input": False,
                "account_collection_verified": False, "package": args.package,
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
+               "duration_limit_seconds": args.seconds,
                "checked_capture": True, "events": events, "visual_review_required": True,
                "launch_mode": "prestarted" if args.prestarted else "native"}
     session, passed, phase = None, False, "identify"
     started = time.monotonic()
-    deadline = datetime.now(UTC) + timedelta(seconds=600)
+    deadline = datetime.now(UTC) + timedelta(seconds=args.seconds)
     def event(**value):
         events.append(value)
         print(json.dumps(value), flush=True)
     try:
-        async with asyncio.timeout(600):
+        async with asyncio.timeout(args.seconds):
             transport = AdbTransport(adb_path=str(args.adb), serial=args.serial,
                 artifacts=(args.artifacts / "u2.jar", args.artifacts / "bridge.jar"), timing_profile="arm-emulator")
             # Isolated diagnostic experiment only. All input and identity bounds stay intact.
@@ -228,6 +237,8 @@ def main():
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")
+    parser.add_argument("--seconds", type=int, choices=(180, 300, 600), default=600,
+                        help="Whole journey deadline, followed by bounded session cleanup")
     args = parser.parse_args()
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))
     os.umask(0o077)

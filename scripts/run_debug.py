@@ -84,11 +84,16 @@ def isolated_avd_paths(avd_home, avd):
 
 
 def guest_command(emulator, avd, port, gpu, disks, *, experimental_arm_smp=False,
-                  disable_jni_checks=False, arm_vcpus=2):
+                  disable_jni_checks=False, arm_vcpus=2, tcg_cache_mb=None, jit_monitor=None):
     if type(arm_vcpus) is not int or arm_vcpus not in (2, 4):
         raise ValueError("ARM diagnostic supports only two or four verified guest CPUs")
     if not experimental_arm_smp and arm_vcpus != 2:
         raise ValueError("Changing guest CPUs requires the explicit ARM SMP experiment")
+    if tcg_cache_mb is not None and (type(tcg_cache_mb) is not int or tcg_cache_mb not in (32, 128, 256, 384, 768)):
+        raise ValueError("TCG cache diagnostic supports only 32, 128, 256, 384 or 768 MiB")
+    if jit_monitor is not None and (not jit_monitor.is_absolute() or len(os.fsencode(jit_monitor)) > 100
+                                    or any(c in str(jit_monitor) for c in (",", "\n", "\r"))):
+        raise ValueError("JIT monitor requires a short absolute local socket path")
     cores = str(arm_vcpus) if experimental_arm_smp else "1"
     command = [str(emulator.resolve()), "-avd", avd, "-port", str(port),
         "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot", "-gpu", gpu,
@@ -104,6 +109,15 @@ def guest_command(emulator, avd, port, gpu, disks, *, experimental_arm_smp=False
         # This is opt-in on a cloned AVD; kernel SMP/PSCI must be checked first.
         command += ["-qemu", "-cpu", "cortex-a15", "-smp", cores,
                     "-accel", "tcg,thread=multi"]
+    engine_options = []
+    if tcg_cache_mb is not None:
+        engine_options += ["-tb-size", str(tcg_cache_mb)]
+    if jit_monitor is not None:
+        engine_options += ["-qmp", "unix:" + str(jit_monitor) + ",server,nowait"]
+    if engine_options:
+        if "-qemu" not in command:
+            command.append("-qemu")
+        command.extend(engine_options)
     return command
 
 
@@ -126,6 +140,10 @@ def main():
                         help="Explicit SMP experiment size; verify the guest kernel CPU limit first")
     parser.add_argument("--disable-jni-checks", action="store_true",
                         help="Use upstream -no-jni for a recorded performance comparison")
+    parser.add_argument("--tcg-cache-mb", type=int, choices=(32, 128, 256, 384, 768),
+                        help="Opt-in translation-cache comparison; keep upstream default if omitted")
+    parser.add_argument("--jit-monitor", action="store_true",
+                        help="Private local QMP socket for read-only JIT statistics")
     args = parser.parse_args()
     if args.arm_vcpus != 2 and not args.experimental_arm_smp:
         parser.error("--arm-vcpus requires --experimental-arm-smp")
@@ -152,6 +170,9 @@ def main():
         with socket.socket() as sock:
             if sock.connect_ex(("127.0.0.1", port)) == 0:
                 parser.error("Isolated test port already occupied")
+    monitor = args.output.resolve() / "jit.sock" if args.jit_monitor else None
+    if monitor is not None and (len(os.fsencode(monitor)) > 100 or any(c in str(monitor) for c in (",", "\n", "\r"))):
+        parser.error("Use a short output path without commas for the private JIT socket")
     args.output.mkdir(parents=True, mode=0o700)
     args.android_home.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
@@ -166,7 +187,8 @@ def main():
         parser.error("host graphics requires the operator's explicit DISPLAY/XAUTHORITY environment")
     command = guest_command(args.emulator, args.avd, args.port, args.gpu, disks,
                             experimental_arm_smp=args.experimental_arm_smp,
-                            disable_jni_checks=args.disable_jni_checks, arm_vcpus=args.arm_vcpus)
+                            disable_jni_checks=args.disable_jni_checks, arm_vcpus=args.arm_vcpus,
+                            tcg_cache_mb=args.tcg_cache_mb, jit_monitor=monitor)
     prefix = ["taskset", "-c", ",".join(map(str, sorted(cpus))), "nice", "-n", "10"]
     gdb = ["gdb", "-nx", "-q", "--batch", "-x", str(Path(__file__).with_name("crash.gdb")), "--args"]
     launcher = gdb if args.debugger == "gdb" else []
@@ -177,6 +199,8 @@ def main():
     receipt = {"command": command, "started_at": datetime.datetime.now().astimezone().isoformat(),
         "serial": "emulator-" + str(args.port), "duration_limit_seconds": args.seconds,
         "debugger": args.debugger,
+        "tcg_cache_mb_requested": args.tcg_cache_mb,
+        "jit_monitor": str(monitor) if monitor else None,
         "experimental_arm_smp": args.experimental_arm_smp,
         "guest_vcpus": args.arm_vcpus if args.experimental_arm_smp else 1,
         "jni_runtime_checks_requested": not args.disable_jni_checks,

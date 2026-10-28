@@ -54,6 +54,10 @@ def main():
         events.append(value); print(json.dumps(value), flush=True)
     passed = False
     try:
+        phase = 'require_boot_complete'
+        if call(['shell', 'getprop', 'sys.boot_completed']).strip() != '1':
+            raise ValueError('Guest has not completed boot')
+        phase = 'resolve'
         component = launch_component(call(['shell', 'cmd', 'package', 'resolve-activity', '--brief',
             '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', args.package]), args.package)
         phase = 'stop_test_app'
