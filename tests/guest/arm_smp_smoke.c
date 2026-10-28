@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #define ITERATIONS 25000
+#define MAX_WORKERS 4
 static atomic_uint total;
 static pthread_barrier_t barrier;
 struct worker { int cpu; int observed_cpu; int error; uint32_t checksum; };
@@ -42,10 +43,10 @@ static void *work(void *opaque) {
 int main(int argc, char **argv) {
     alarm(30);
     int count = argc == 2 ? atoi(argv[1]) : 2;
-    if (count < 1 || count > 2) return 2;
+    if (count < 1 || count > MAX_WORKERS) return 2;
     cpu_set_t allowed;
     if (sched_getaffinity(0, sizeof(allowed), &allowed)) return 3;
-    struct worker workers[2] = {{0}};
+    struct worker workers[MAX_WORKERS] = {{0}};
     int found = 0;
     for (int cpu = 0; cpu < CPU_SETSIZE && found < count; ++cpu) {
         if (CPU_ISSET(cpu, &allowed)) workers[found++].cpu = cpu;
@@ -55,7 +56,7 @@ int main(int argc, char **argv) {
         return 4;
     }
     if (pthread_barrier_init(&barrier, NULL, count)) return 5;
-    pthread_t threads[2];
+    pthread_t threads[MAX_WORKERS];
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
     for (int i = 0; i < count; ++i)
@@ -70,9 +71,10 @@ int main(int argc, char **argv) {
             workers[i].checksum != expected) return 8;
     if (atomic_load(&total) != (unsigned)count * ITERATIONS) return 9;
     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
-    printf("{\"passed\":true,\"workers\":%d,\"cpu0\":%d,\"cpu1\":%d,"
+    printf("{\"passed\":true,\"workers\":%d,\"cpu0\":%d,\"cpu1\":%d,\"cpu2\":%d,\"cpu3\":%d,"
            "\"atomic_total\":%u,\"checksum\":%u,\"seconds\":%.6f}\n",
-           count, workers[0].observed_cpu, count == 2 ? workers[1].observed_cpu : -1,
+           count, workers[0].observed_cpu, count >= 2 ? workers[1].observed_cpu : -1,
+           count >= 3 ? workers[2].observed_cpu : -1, count >= 4 ? workers[3].observed_cpu : -1,
            atomic_load(&total), expected, elapsed);
     pthread_barrier_destroy(&barrier);
     return 0;

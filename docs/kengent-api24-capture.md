@@ -348,3 +348,138 @@ plus `expected_frame_ref` image path. The repeated ANR while accessibility was
 attached is a hypothesis to test, not an established causal diagnosis. Warm
 unbound screenshots alone remain insufficient. Full managed funds/holdings and
 production Stock replacement have still not passed.
+
+## Delayed bridge attachment and strict public capture
+
+A separate two-CPU run launched the unmodified broker once before attaching
+UiAutomation. The first 15-second `logcat` read timed out; that diagnostic failure
+was retained and the launch was **not** replayed. A later bounded log read proved
+MainScreen displayed in 79.662 seconds for the full Activity chain (46.540 seconds
+for MainScreen itself). An independent screen showed the public home page.
+
+The final event buffer contained one SystemUI TIME_TICK ANR during boot, before
+the broker launch, and no Junhong ANR. Delayed attachment therefore does not prove
+all system startup problems solved. Host memory pressure averaged zero during
+the sample; the guest had approximately 628 MiB free and no swap. One TCG vCPU
+thread used about 92% CPU and the other 47%; these are sampled process-lifetime
+figures, not an end-to-end performance model.
+
+The first strict homepage observation succeeded but its checked image was
+rejected by the unchanged snapshot guard. An exact, freshly observed public
+`行情` control was tapped once. The first checked image after that page transition
+was also rejected. Neither rejection was converted into success or an input retry.
+After the public page settled, two XML-only observations were byte-identical
+(6.493 and 5.506 seconds) and passed offline backend validation.
+
+A fresh final session then passed three complete Stock-style observation/image
+pairs, preserving exact foreground, geometry, hierarchy and `expected_frame_ref`:
+
+| Pair | XML observation | Checked image request |
+| --- | ---: | ---: |
+| 1 | 5.645 s | 7.248 s |
+| 2 | 3.289 s | 7.944 s |
+| 3 | 2.745 s | 6.092 s |
+
+All six original wire receipts passed offline AndroidBackend validation; the
+native generation's cleanup was acknowledged. These were public unlogged-in
+market-page captures, not authenticated account/funds evidence and not proof
+that the visible market prices were current. The run ended via its owned stop
+request after 617.22 seconds; its debugger/emulator exited and both ports were
+verified free. P30, production bindings and services were not operated.
+
+`scripts/probe_public_capture.py --checked` now preserves both original requests
+and receipts for this stronger check. Its offline validator rejects a missing or
+changed original binding and cannot turn a failed live probe into a passed one.
+Six helper tests with 25 subtests passed. Full managed account capture remains
+required before any Stock cutover.
+
+## Four-core comparison remains experimental
+
+The actual isolated guest kernel reports `CONFIG_NR_CPUS=4`, `CONFIG_SMP=y` and
+`CONFIG_ARM_PSCI=y`. The runner can now explicitly test `--arm-vcpus 4` together
+with `--experimental-arm-smp` and four allowed host CPUs. Its default remains two
+guest CPUs; unsupported counts and an undersized host affinity are rejected.
+Fourteen focused debug-tool tests with nine subtests passed. The ARMv7 API24
+native fixture was rebuilt with debug symbols and warnings as errors; four pinned
+workers executed on CPUs 0, 1, 2 and 3, produced the expected checksum 1876018158
+and exactly 100000 atomic increments. That CPU fixture does not prove App stability.
+
+One four-core cold run used the same isolated AVD, system image, unchanged APKs,
+bridge and debug-symbol emulator, with JNI runtime checking still enabled. All
+four guest CPUs were online. Junhong's full launch chain took 115.414 seconds
+(MainScreen itself 61.227 seconds), compared with 79.662 seconds in the preceding
+two-core sample. The launch helper observed completion later, at 142.633 seconds;
+log polling latency must not be mislabeled as App launch time.
+
+SystemUI TIME_TICK and LatinIME DATE_CHANGED ANRs occurred during startup. The
+broker public navigation succeeded, but its first XML observation after switching
+to the market page exceeded 30 seconds; cleanup was acknowledged. TongdaXin then
+acknowledged launch in 24.242 seconds and returned a structurally valid screenshot
+in 3.254 seconds. Visual inspection showed its splash page; a later system screen
+showed an empty loading area. These are **not** accepted market-data captures.
+The retained final ANR buffer had the two system-component records and no broker
+ANR; absence in that buffer is not long-duration stability proof.
+
+The four-core run ended cleanly after 656.32 seconds. Owned debugger/emulator
+processes and both dedicated ports were checked released. This single comparison
+does not justify a four-core default or relaxed capture guards. The next separate
+test returns to the unchanged two-core default and checks actual TongdaXin quote
+identity/date, rather than counting its loading-page screenshot as success.
+
+## Return to two CPUs: TongdaXin identity and transitional pages
+
+A separate run returned to the unchanged two-CPU default. The native public
+search probe first stopped on an incomplete/changing hierarchy, before any tap.
+Independent visual inspection later showed the loaded market page. A fresh
+session tapped its observed search control once; the transition's screenshot
+took 27.017 seconds, versus 7.197 seconds for the settled market screenshot.
+
+The next session entered `600999` once and preserved the rendered search field.
+It did not find a uniquely matching suggestion and stopped without guessing a
+row. A new explicit public-search action used the visible `搜索` button. It then
+matched and opened `招商证券 / 600999` exactly; the settled search screenshots
+took 1.932 and 2.353 seconds. The first screenshot after opening quote details
+still exhausted its 30-second bound. That failed receipt was retained, and the
+accepted navigation was not replayed.
+
+A later original screenshot showed the correct daily-candle chart, selected
+`日K`, stock `600999`, and range ending **2026-10-28**. The automatic XML-only
+identity check nevertheless failed: the code was visible in the image but absent
+from the accessibility hierarchy. Visual verification was stored separately with
+the original image hash; the failed probe receipt was not changed to success.
+This distinction prevents a canvas-rendered identifier from being mislabeled as
+missing market data, without inventing identity in the native tree.
+
+The first strict observation/checked-image pair passed (8.697 and 8.906 seconds).
+The second pair was rejected by the unchanged snapshot guard. Offline validation
+accepted the three individual retained successful receipts but correctly left
+the overall live run failed. The chart has a rotating inline announcement; a
+separate bounded comparison closes only that visibly identified public notice
+using a fresh frame, then repeats the same strict checks. This is a UI comparison,
+not permission to ignore an unknown surface or relax the image binding.
+
+After the normal inline-notice close, all three strict pairs succeeded:
+
+| Pair | XML observation | Checked image request |
+| --- | ---: | ---: |
+| 1 | 3.295 s | 3.410 s |
+| 2 | 1.818 s | 4.691 s |
+| 3 | 1.112 s | 4.197 s |
+
+All six wire receipts passed offline AndroidBackend validation. The final image
+still showed `招商证券 600999`, selected daily candles and `2026/10/28` as the chart
+end date. The native session's cleanup was acknowledged. The original failed
+transitional runs remain failed. This single before/after comparison supports
+testing deterministic handling of this exact visible announcement; it is not
+proof that every guard rejection is caused by announcements or permission to
+close unknown dialogs.
+
+The extended native CPU fixture also passed after returning to two CPUs, with
+50000 increments and the same checksum. The final retained ANR event buffer was
+empty in this run. No account was entered, authenticated funds/holdings were not
+captured, no production binding or service was changed, and no physical-device
+command was sent. Full account acceptance and repeatable cold-start handling
+remain outstanding. The terminal still lacks the managed tenant-app adapter and
+current trusted request Context; existing login consent does not replace them.
+
+The final two-core run ended via its owned stop request after 1014.39 seconds, exit 0. Debugger/emulator processes and both diagnostic ports were verified released.

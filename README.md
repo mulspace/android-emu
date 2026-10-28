@@ -6,11 +6,12 @@ patches, build tools and sanitized findings are maintained in this repository.
 
 ## Current objective
 
-Diagnose the host SIGILL observed with Android Emulator 30.5.3 (build 7196367)
-while an unmodified Junhong ARM32 compatibility APK opens its broker page.
-Tongdaxin public quotes and daily candles already worked in the isolated test.
-This does **not** establish complete broker-account collection or readiness for
-production cutover.
+The original host SIGILL and deleted-buffer failures have source-level fixes
+and symbolized builds. Current work targets cold startup and repeatable guarded
+capture with unmodified Junhong/TongdaXin ARM32 APKs. TongdaXin public daily
+candles and three strictly paired Junhong public-market captures have passed
+on the isolated test device. Cold-start ANRs remain; complete authenticated
+funds/holdings capture and production cutover are **not** established.
 
 The public `emu-30-release` manifest is the initial build baseline. Its pinned
 source is **not claimed to be the exact source of build 7196367**. Each binary's
@@ -59,7 +60,7 @@ physical phone, invokes a scheduler, or changes a production binding implicitly.
 - Production cutover requires repeatable market capture **and** complete broker
   funds/holdings capture. Do not affect an existing physical-device workload.
 
-## Optional ARM32 dual-CPU experiment
+## Optional ARM32 SMP experiment
 
 The pinned x86-host wrapper otherwise starts ARM with one guest CPU. The Ranchu
 patch advertises PSCI to multi-CPU TCG guests; two online CPUs and the native
@@ -73,6 +74,11 @@ python3 scripts/run_debug.py --emulator /path/to/work/out/arm32-relwithdebinfo/e
   --avd android-emu-debug-arm32-clone --port 5576 --output /path/to/new/evidence \
   --gpu host --host-cpus 0,1 --seconds 1200 --experimental-arm-smp
 ```
+
+An optional `--arm-vcpus 4` comparison requires four allowed host CPUs and a
+verified guest kernel supporting four CPUs. The default SMP experiment remains
+two CPUs. Both wrapper and QEMU receive the same explicit count; this is not a
+production default or an account-compatibility claim.
 
 Supply host DISPLAY/XAUTHORITY explicitly for host graphics. Use an offline,
 independent AVD copy, including its `userdata-qemu.img.qcow2`, `cache.img.qcow2`

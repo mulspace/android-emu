@@ -83,10 +83,16 @@ def isolated_avd_paths(avd_home, avd):
     return disks
 
 
-def guest_command(emulator, avd, port, gpu, disks, *, experimental_arm_smp=False, disable_jni_checks=False):
+def guest_command(emulator, avd, port, gpu, disks, *, experimental_arm_smp=False,
+                  disable_jni_checks=False, arm_vcpus=2):
+    if type(arm_vcpus) is not int or arm_vcpus not in (2, 4):
+        raise ValueError("ARM diagnostic supports only two or four verified guest CPUs")
+    if not experimental_arm_smp and arm_vcpus != 2:
+        raise ValueError("Changing guest CPUs requires the explicit ARM SMP experiment")
+    cores = str(arm_vcpus) if experimental_arm_smp else "1"
     command = [str(emulator.resolve()), "-avd", avd, "-port", str(port),
         "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot", "-gpu", gpu,
-        "-cores", "2" if experimental_arm_smp else "1", "-memory", "1536",
+        "-cores", cores, "-memory", "1536",
         "-feature", "-Vulkan", "-accel", "off", "-camera-back", "none",
         "-camera-front", "none", "-show-kernel", "-data", str(disks[0]),
         "-cache", str(disks[1])]
@@ -96,7 +102,7 @@ def guest_command(emulator, avd, port, gpu, disks, *, experimental_arm_smp=False
     if experimental_arm_smp:
         # The pinned emulator wrapper otherwise omits -smp for ARM on x86 hosts.
         # This is opt-in on a cloned AVD; kernel SMP/PSCI must be checked first.
-        command += ["-qemu", "-cpu", "cortex-a15", "-smp", "2",
+        command += ["-qemu", "-cpu", "cortex-a15", "-smp", cores,
                     "-accel", "tcg,thread=multi"]
     return command
 
@@ -113,10 +119,14 @@ def main():
     parser.add_argument("--gpu", choices=("host", "swiftshader_indirect"), default="host")
     parser.add_argument("--host-cpus", default="14,15")
     parser.add_argument("--experimental-arm-smp", action="store_true",
-                        help="Test two ARMv7 vCPUs/MTTCG on a separate cloned AVD")
+                        help="Test ARMv7 SMP/MTTCG on a separate cloned AVD")
+    parser.add_argument("--arm-vcpus", type=int, choices=(2, 4), default=2,
+                        help="Explicit SMP experiment size; verify the guest kernel CPU limit first")
     parser.add_argument("--disable-jni-checks", action="store_true",
                         help="Use upstream -no-jni for a recorded performance comparison")
     args = parser.parse_args()
+    if args.arm_vcpus != 2 and not args.experimental_arm_smp:
+        parser.error("--arm-vcpus requires --experimental-arm-smp")
     if not re.fullmatch(r"android-emu-debug-[a-z0-9-]+", args.avd):
         parser.error("Only isolated android-emu-debug-* AVDs are allowed")
     if args.port < 5554 or args.port > 5682 or args.port % 2 or args.port in (5554, 5556, 5558, 5566):
@@ -134,6 +144,8 @@ def main():
     cpus = {int(v) for v in args.host_cpus.split(",")}
     if not cpus or len(cpus) > 4 or not cpus <= os.sched_getaffinity(0):
         parser.error("Choose at most four available host CPUs")
+    if args.experimental_arm_smp and len(cpus) < args.arm_vcpus:
+        parser.error("Provide at least one allowed host CPU per experimental guest CPU")
     for port in (args.port, args.port + 1):
         with socket.socket() as sock:
             if sock.connect_ex(("127.0.0.1", port)) == 0:
@@ -152,7 +164,7 @@ def main():
         parser.error("host graphics requires the operator's explicit DISPLAY/XAUTHORITY environment")
     command = guest_command(args.emulator, args.avd, args.port, args.gpu, disks,
                             experimental_arm_smp=args.experimental_arm_smp,
-                            disable_jni_checks=args.disable_jni_checks)
+                            disable_jni_checks=args.disable_jni_checks, arm_vcpus=args.arm_vcpus)
     prefix = ["taskset", "-c", ",".join(map(str, sorted(cpus))), "nice", "-n", "10"]
     gdb = ["gdb", "-nx", "-q", "--batch", "-x", str(Path(__file__).with_name("crash.gdb")), "--args"]
     started = time.monotonic()
@@ -162,6 +174,7 @@ def main():
     receipt = {"command": command, "started_at": datetime.datetime.now().astimezone().isoformat(),
         "serial": "emulator-" + str(args.port), "duration_limit_seconds": args.seconds,
         "experimental_arm_smp": args.experimental_arm_smp,
+        "guest_vcpus": args.arm_vcpus if args.experimental_arm_smp else 1,
         "jni_runtime_checks_requested": not args.disable_jni_checks,
         "production_cutover": False, "physical_device_operated": False, "account_login_attempted": False}
     with (args.output / "gdb.log").open("wb") as log:

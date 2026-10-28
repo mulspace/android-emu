@@ -153,6 +153,19 @@ class BuildTests(unittest.TestCase):
 
 
 class IsolatedGuestTests(unittest.TestCase):
+    def test_four_core_experiment_keeps_wrapper_and_engine_in_agreement(self):
+        disks = [Path('/isolated/userdata-qemu.img'), Path('/isolated/cache.img')]
+        args = (Path('/emulator'), 'android-emu-debug-test', 5576, 'host', disks)
+        command = guest_command(*args, experimental_arm_smp=True, arm_vcpus=4)
+        self.assertEqual(command[command.index('-cores') + 1], '4')
+        self.assertEqual(command[command.index('-smp') + 1], '4')
+        self.assertNotIn('-no-jni', command)
+        for value in (True, 1, 3, 8, '4'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                guest_command(*args, experimental_arm_smp=True, arm_vcpus=value)
+        with self.assertRaises(ValueError):
+            guest_command(*args, arm_vcpus=4)
+
     def test_qcow_backing_cannot_escape_the_cloned_avd(self):
         with tempfile.TemporaryDirectory() as tmp:
             disk = Path(tmp) / 'userdata-qemu.img'
