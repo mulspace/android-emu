@@ -84,19 +84,9 @@ class Journey:
     async def wait(self, phase, selector, *, stable=False):
         previous = None
         for attempt in range(8):
-            try:
-                frame = await self.capture(f"{phase}_{attempt+1}", {"include_image": False, "include_xml": True})
-            except Exception as error:
-                # Startup can briefly expose no root or a disappearing node. Only
-                # retry this read; never repeat an action, timeout or denied surface.
-                diagnostic = getattr(error, "native_diagnostic", None)
-                if not isinstance(diagnostic, dict) or diagnostic.get("phase") != "snapshot_incomplete_hierarchy":
-                    raise
-                if attempt == 7:
-                    raise
-                previous = None
-                await self.pause(2)
-                continue
+            # A native error ends its session. Recovery belongs inside that
+            # original native request; never send another RPC after failure.
+            frame = await self.capture(f"{phase}_{attempt+1}", {"include_image": False, "include_xml": True})
             chosen = selector(nodes(frame, self.package))
             if chosen is not None and (not stable or chosen == previous):
                 return frame, chosen
@@ -199,6 +189,7 @@ async def probe(args):
             await session.start(context)
             event(phase=phase, ok=True, seconds=round(time.monotonic()-started, 3))
             last_renewal = time.monotonic()
+            attempts = {}
             async def call(name, operation, options):
                 nonlocal phase, last_renewal
                 phase = name
@@ -210,9 +201,16 @@ async def probe(args):
                     last_renewal = time.monotonic()
                 tick = time.monotonic()
                 (args.output / f"{name}.request.json").write_text(json.dumps(options) + "\n")
-                raw = await session.call(operation, {"arguments": options})
+                attempts[name] = attempts.get(name, 0) + 1
+                try:
+                    raw = await session.call(operation, {"arguments": options})
+                except Exception as error:
+                    event(phase=name, attempt=attempts[name], ok=False,
+                          seconds=round(time.monotonic()-tick, 3), type=type(error).__name__,
+                          diagnostic=getattr(error, "native_diagnostic", None))
+                    raise
                 (args.output / f"{name}.wire.json").write_text(json.dumps(raw) + "\n")
-                event(phase=name, ok=True, seconds=round(time.monotonic()-tick, 3))
+                event(phase=name, attempt=attempts[name], ok=True, seconds=round(time.monotonic()-tick, 3))
                 return raw
             async def capture(name, options):
                 raw = await call(name, "android.snapshot", options)

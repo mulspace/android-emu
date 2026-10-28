@@ -50,6 +50,19 @@ def retry_incomplete_checked(source):
     return source.replace(old, new)
 
 
+def hierarchy_retry_delay(source, milliseconds):
+    """Change only the two intra-request snapshot pauses, never input/lifetime."""
+    if milliseconds not in (25, 250, 1000):
+        raise ValueError("Unsupported hierarchy retry delay")
+    start = source.index("    private static JSONObject captureSnapshot(")
+    end = source.index("    private static", start + 1)
+    block = source[start:end]
+    anchor = "SystemClock.sleep(25L); alive();"
+    if block.count(anchor) != 2:
+        raise ValueError("Hierarchy pause source anchor changed")
+    return source[:start] + block.replace(anchor, f"SystemClock.sleep({milliseconds}L); alive();") + source[end:]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kengent-root", type=Path, required=True)
@@ -57,6 +70,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--single-pass", action="store_true", help="Experimental complete tree/sensitivity traversal; not a production build")
     parser.add_argument("--retry-incomplete-checked", action="store_true", help="Diagnostic: retry missing nodes at most three times without changing the expected frame")
+    parser.add_argument("--hierarchy-retry-delay-ms", type=int, choices=(25, 250, 1000), default=25,
+                        help="Diagnostic intra-request retry pause; no retries after a native session fails")
     parser.add_argument("--experimental-source", type=Path, default=Path(__file__).resolve().parents[1] / "experimental/native")
     args = parser.parse_args()
     os.umask(0o077)
@@ -86,6 +101,7 @@ def main():
     if args.retry_incomplete_checked:
         checks = copied / "SnapshotCapture.java"
         checks.write_text(retry_incomplete_checked(checks.read_text()))
+    instrumented = hierarchy_retry_delay(instrumented, args.hierarchy_retry_delay_ms)
     source.write_text(instrumented)
     resource_files = android.resources.files
     def resources(name):
@@ -95,7 +111,8 @@ def main():
     shutil.copyfile(engine, args.output / "u2.jar")
     shutil.copyfile(bridge, args.output / "bridge.jar")
     receipt = {"diagnostic_only": True, "device_operations": False, "experimental_single_pass": args.single_pass,
-               "experimental_checked_retry": args.retry_incomplete_checked, "source_hashes": before,
+               "experimental_checked_retry": args.retry_incomplete_checked,
+               "hierarchy_retry_delay_ms": args.hierarchy_retry_delay_ms, "source_hashes": before,
                "built_source_hashes": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in copied.glob("*.java")},
                "bridge_sha256": hashlib.sha256(bridge.read_bytes()).hexdigest(),
                "instrumented_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}

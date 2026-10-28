@@ -83,10 +83,10 @@ public index/market content, not an authenticated account. The earlier Tongdaxin
 failure was in foreground/root acquisition, with three failures only milliseconds
 apart. An Activity display event is therefore not sufficient readiness evidence.
 
-The diagnostic public journey now waits for explicitly incomplete read-only
-hierarchies within its existing eight-read and whole-request deadlines. It never
-replays an input action, retries a generic timeout, accepts a denied foreground,
-or skips a sensitivity check. Checked screenshot pairing remains unchanged.
+At this point, an outer incomplete-read retry was introduced in the diagnostic
+journey. Later native-session testing showed that this retry cannot reuse a failed
+bridge; it has been removed (see Final observation readiness below). Normal
+loading-page reads remain bounded, and checked screenshot pairing is unchanged.
 
 Tongdaxin subsequently completed the full public 600999 search-to-daily-chart
 journey in 139.872 s with three accepted checked screenshots: 8.642 s, 3.834 s
@@ -164,8 +164,8 @@ click was sent to compensate for this uncertain outcome.
 
 The isolated journey now requires the exact public stock hit (including bounds)
 to match across two consecutive read-only observations, using the latest frame
-for its single tap. An incomplete read resets that stability requirement; unknown
-pages, transport timeouts and sensitivity/foreground failures are not relaxed.
+for its single tap. Native read failures stop the journey; unknown pages,
+transport timeouts and sensitivity/foreground failures are not relaxed.
 
 
 The stable-result follow-up passed after a fresh emulator boot with the default
@@ -180,3 +180,56 @@ live intraday freshness, repeated cold-start reliability or account acceptance.
 All 47 repository tests passed. The native session acknowledged cleanup. The
 owned emulator was explicitly stopped (runner exit -10 after 464.09 s), with its
 exact PID absent and ports 5576/5577 released. P30 and production remained untouched.
+
+
+## Final observation readiness
+
+A new Junhong cold-process journey with a diagnostic 90-second read budget reached
+the public market page, then failed after 102.870 s on its first XML-only observation.
+The three native attempts each encountered a disappearing descendant at depth 18;
+refreshing its parent returned false. Their traversal portions took 3.307, 4.095
+and 8.180 s. This failure was not a transport timeout or a successful image capture.
+Session cleanup completed; no input was replayed.
+
+A Python-level retry candidate was rejected after real testing: the native bridge
+sets its failure flag and terminates the session on any emitted failure. The second
+RPC therefore immediately failed. The candidate's first checked image passed in
+19.259 s, but the second XML observation failed after 14.765 s; the full run failed
+after 126.394 s with cleanup confirmed. Mocked retry tests alone had missed this
+native lifecycle rule. The outer retry was removed, including an earlier navigation
+readiness retry. All native errors now end the journey without another RPC.
+
+The next isolated candidate changes only the two existing snapshot retry pauses
+inside one native RPC from 25 ms to 1000 ms. Retry counts, original expected frame,
+permission/sensitivity checks, session lifetime and host deadline are unchanged.
+The build flag defaults to 25 ms and rejects source-anchor drift. This is not a
+production Resource Node change; a missing hierarchy still fails after its bound.
+Per-request attempt/failure diagnostics remain in the private probe receipt.
+
+The successful TDX run's six original read/image receipts were also replayed through
+Kengent's unchanged AndroidBackend validators and accepted offline. This exercises
+response validation only; its synthetic offline-fixture Context never accesses a
+live service, device, credential or account.
+
+
+The 1000 ms native-pause build (`bridge.jar` SHA-256
+`6a38e064fd1bdf4a355159ed7d42a132f209caa29fa7fc01349e0c2e9019b1e9`)
+compiled and the 47 final tooling tests passed. In a fresh emulator run, Junhong's
+display helper completed after 59.259 s. The default-30-second public journey
+accepted two checked images in 15.543 and 11.639 s, then correctly rejected the
+third with `snapshot_changed_before_capture`. It ended after 151.372 s and
+confirmed cleanup. No RPC followed that emitted native error.
+
+The retained numeric log contains no incomplete-root/child event in this trial,
+so it did **not** exercise the 1000 ms retry delay and cannot prove that delay
+improved anything. No guest crash or ANR event was retained. The failure is a
+changed observation, not evidence of a new emulator crash; its exact differing
+fields remain unverified. Five successful read/image receipts passed the unchanged
+backend's offline validators, but the aggregate acceptance result stayed failed.
+Visual review confirmed the public A-share market screen, not account assets.
+
+The owned emulator was explicitly stopped (exit -10, 428.08 s); PID and ports were
+verified released. No account login, credentials, P30, production binding, service
+reload or Scheduler operation occurred. The desktop's uncredentialed console
+identity check returned HTTP 401; authenticated account acceptance still requires
+an actual managed ingress, never an invented Context or raw credential shortcut.

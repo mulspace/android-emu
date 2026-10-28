@@ -176,40 +176,19 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chosen["bounds"], "[10,10][20,20]")
         self.assertEqual(len(calls),3)
 
-    async def test_transient_incomplete_read_retries_without_input(self):
-        class Missing(Exception):
-            native_diagnostic = {"phase": "snapshot_incomplete_hierarchy"}
-        calls, pauses = [], []
-        async def capture(phase, options):
-            calls.append(phase)
-            if len(calls) == 1:
-                raise Missing()
-            return frame(chart())
-        async def action(*args):
-            self.fail("Read readiness must not inject input")
-        async def pause(seconds):
-            pauses.append(seconds)
-        result, _ = await Journey(TDX, capture, action, pause).wait("ready", daily)
-        self.assertEqual(result["foreground_package"], TDX)
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(pauses, [2])
-
-    async def test_missing_root_retries_remain_bounded_and_denied_roots_do_not_retry(self):
-        for phase, expected_reads in (("snapshot_incomplete_hierarchy", 8),
-                                      ("snapshot_foreground", 1), ("snapshot_sensitive", 1)):
+    async def test_native_failure_ends_session_and_never_retries_rpc(self):
+        for phase in ("snapshot_incomplete_hierarchy", "snapshot_foreground", "snapshot_sensitive"):
             class Failure(Exception):
                 native_diagnostic = {"phase": phase}
             calls = []
             async def capture(*args):
                 calls.append(1)
                 raise Failure()
-            async def action(*args):
-                self.fail("Unexpected action")
-            async def pause(seconds):
-                pass
+            async def action(*args): self.fail("Unexpected action")
+            async def pause(seconds): self.fail("A failed native session cannot be reused")
             with self.subTest(phase=phase), self.assertRaises(Failure):
                 await Journey(TDX, capture, action, pause).wait("ready", daily)
-            self.assertEqual(len(calls), expected_reads)
+            self.assertEqual(len(calls), 1)
 
     async def test_failed_snapshot_stops_immediately(self):
         calls = []
