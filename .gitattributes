@@ -1,0 +1,2 @@
+# Preserve the exact bytes of the authoritative upstream manifest.
+upstream/emu-30-release.xml -whitespace

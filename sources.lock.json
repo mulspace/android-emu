@@ -1,0 +1,211 @@
+{
+  "baseline": "emu-30-release",
+  "baseline_note": "Published source baseline, not yet proven identical to SDK build 7196367",
+  "manifest_sha256": "c219d0a2e546c392a4c587682945d02d1b8ce796182f0411c8421336934563c6",
+  "projects": [
+    {
+      "path": "device/generic/goldfish-opengl",
+      "url": "https://android.googlesource.com/device/generic/goldfish-opengl",
+      "revision": "a8fc63f7129f5be0ed05ebe774b4a8813519ecd0"
+    },
+    {
+      "path": "device/generic/vulkan-cereal",
+      "url": "https://android.googlesource.com/device/generic/vulkan-cereal",
+      "revision": "1add8719832629b9f840f8c024758489d7fda3fa"
+    },
+    {
+      "path": "external/adt-infra",
+      "url": "https://android.googlesource.com/platform/external/adt-infra",
+      "revision": "c359be1ccf08f976bc2fa3693d115a1bd829ada8"
+    },
+    {
+      "path": "external/astc-codec",
+      "url": "https://android.googlesource.com/platform/external/astc-codec",
+      "revision": "17ae36822a8084f45ae51f9031e81f8318254f33"
+    },
+    {
+      "path": "external/boringssl",
+      "url": "https://android.googlesource.com/platform/external/boringssl",
+      "revision": "797579ebb0484fa8fe6b6d1d6d76739123ec0f49"
+    },
+    {
+      "path": "external/cares",
+      "url": "https://android.googlesource.com/platform/external/c-ares",
+      "revision": "d0a9ffece61292c5f9668b3b107d9977356fd8c7"
+    },
+    {
+      "path": "external/curl",
+      "url": "https://android.googlesource.com/platform/external/curl",
+      "revision": "1da4b04273638c8afe6f88bd7a7ccfb693640773"
+    },
+    {
+      "path": "external/googletest",
+      "url": "https://android.googlesource.com/platform/external/googletest",
+      "revision": "7f6300714c0eedf81727cbfb9d5d08979fee3c2d"
+    },
+    {
+      "path": "external/google-benchmark",
+      "url": "https://android.googlesource.com/platform/external/google-benchmark",
+      "revision": "db1632fadc79df388a2a7248157c965ee40248a1"
+    },
+    {
+      "path": "external/google-breakpad",
+      "url": "https://android.googlesource.com/platform/external/google-breakpad",
+      "revision": "a1414818b9f9810a3b45f1f55d9c00f5116ec7d9"
+    },
+    {
+      "path": "external/grpc",
+      "url": "https://android.googlesource.com/platform/external/grpc-grpc",
+      "revision": "e6adaf6de09887cc7aa17144f4bf53654d7824b7"
+    },
+    {
+      "path": "external/libusb",
+      "url": "https://android.googlesource.com/platform/external/libusb",
+      "revision": "06173bd744cbddc0d3b5db1c2dc2be0071a01596"
+    },
+    {
+      "path": "external/libyuv",
+      "url": "https://android.googlesource.com/platform/external/libyuv",
+      "revision": "0ad265184c764bebda45819ca1c7375a322fe4be"
+    },
+    {
+      "path": "external/libpng",
+      "url": "https://android.googlesource.com/platform/external/libpng",
+      "revision": "5d19b1bb0f5694f2ae47b3cc2ccfeb571764b439"
+    },
+    {
+      "path": "external/lz4",
+      "url": "https://android.googlesource.com/platform/external/lz4",
+      "revision": "1a184fdeb99f4cc11b774ac5b0b824b38105ec6c"
+    },
+    {
+      "path": "external/protobuf",
+      "url": "https://android.googlesource.com/platform/external/protobuf",
+      "revision": "ca15ad7fb89a626c0d2a98240b11a2523727f9be"
+    },
+    {
+      "path": "external/perfetto",
+      "url": "https://android.googlesource.com/platform/external/perfetto",
+      "revision": "5f990b86ec4e8a6fe180aaaacb5a613e24f937d7"
+    },
+    {
+      "path": "external/qemu",
+      "url": "https://android.googlesource.com/platform/external/qemu",
+      "revision": "e106d9eeab3c96db145bc5b59188283acdba3df8"
+    },
+    {
+      "path": "external/tinyobjloader",
+      "url": "https://android.googlesource.com/platform/external/tinyobjloader",
+      "revision": "d16a940067fbc191364fc1d3e2a2d907209c9320"
+    },
+    {
+      "path": "external/virglrenderer",
+      "url": "https://android.googlesource.com/platform/external/virglrenderer",
+      "revision": "f0c2fba5827abb3634b1992855264d7fe990b89d"
+    },
+    {
+      "path": "external/nasm",
+      "url": "https://android.googlesource.com/platform/external/nasm",
+      "revision": "645e4f02c622ba67eb754000cc00c9db8be31f85"
+    },
+    {
+      "path": "external/wpa_supplicant_8",
+      "url": "https://android.googlesource.com/platform/external/wpa_supplicant_8",
+      "revision": "46e9bac849c82897a2099503f5a8eb0c49b76d29"
+    },
+    {
+      "path": "external/zlib",
+      "url": "https://android.googlesource.com/platform/external/zlib",
+      "revision": "7656f9eff09cc38244978773777ee64b7b31155d"
+    },
+    {
+      "path": "frameworks/native",
+      "url": "https://android.googlesource.com/platform/frameworks/native",
+      "revision": "9094ee238458bf1e8a9e8335fd824acc4963d7f4"
+    },
+    {
+      "path": "prebuilts/android-emulator-build/common",
+      "url": "https://android.googlesource.com/platform/prebuilts/android-emulator-build/common",
+      "revision": "f69bd644201846be4d3a75c95d6116b08c5f6ea0",
+      "subtrees": [
+        "ANGLE/linux-x86_64",
+        "e2fsprogs/linux-x86_64",
+        "ffmpeg/linux-x86_64",
+        "libunwind/linux-x86_64",
+        "libusb/linux-x86_64",
+        "libvpx/linux-x86_64",
+        "libxml2/linux-x86_64",
+        "tcmalloc/linux-x86_64",
+        "virglrenderer/linux-x86_64",
+        "vulkan/linux-x86_64",
+        "x264/linux-x86_64",
+        "swiftshader/linux-x86_64",
+        "qtwebengine-deps/linux-x86_64",
+        "virtualscene"
+      ]
+    },
+    {
+      "path": "prebuilts/android-emulator-build/qemu-android-deps",
+      "url": "https://android.googlesource.com/platform/prebuilts/android-emulator-build/qemu-android-deps",
+      "revision": "95807eb0b21f64fb237bc62c957575230e5a63dc",
+      "subtree": "linux-x86_64"
+    },
+    {
+      "path": "prebuilts/android-emulator-build/qt",
+      "url": "https://android.googlesource.com/platform/prebuilts/android-emulator-build/qt",
+      "revision": "9382421d86bc6db78d3785d2c34758330787165c",
+      "subtree": "linux-x86_64-nowebengine"
+    },
+    {
+      "path": "prebuilts/clang/host/linux-x86",
+      "url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86",
+      "revision": "29a5e650a390db9aef0dcf37732a646556ef4270",
+      "subtree": "clang-r416183b"
+    },
+    {
+      "path": "prebuilts/cmake/linux-x86",
+      "url": "https://android.googlesource.com/platform/prebuilts/cmake/linux-x86",
+      "revision": "40dcb6f55bd2e8731e3e4f1a1721f7ff0fb83cb1"
+    },
+    {
+      "path": "prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+      "url": "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/host/x86_64-linux-glibc2.17-4.8",
+      "revision": "fc0ecb800c84bbb7dcc3cd334f214d657ce0f3db"
+    },
+    {
+      "path": "prebuilts/ninja/linux-x86",
+      "url": "https://android.googlesource.com/platform/prebuilts/ninja/linux-x86",
+      "revision": "7ef4cb95e1ed4305e99f03a8e8ad28d26134a45b"
+    },
+    {
+      "path": "prebuilts/tools",
+      "url": "https://android.googlesource.com/platform/prebuilts/tools",
+      "revision": "72f075b143e5698d97b0efff9aa741ebad5a378a"
+    },
+    {
+      "path": "system/bt",
+      "url": "https://android.googlesource.com/platform/system/bt",
+      "revision": "9975f8811d7a81c8cc289a9e499fef08d18670e1"
+    },
+    {
+      "path": "external/libchrome",
+      "url": "https://android.googlesource.com/platform/external/libchrome",
+      "revision": "5ea50b0d01fbf9863cd3b53c54720cc9aa599d28"
+    },
+    {
+      "path": "external/bison",
+      "url": "https://android.googlesource.com/platform/external/bison",
+      "revision": "133f07eb33b32727e058dd25a1441ab4c2fc127a"
+    },
+    {
+      "path": "external/flex",
+      "url": "https://android.googlesource.com/platform/external/flex",
+      "revision": "90a4022e091f39d3534a30bbb9d02986f2f5ad9b"
+    },
+    {
+      "path": "external/m4",
+      "url": "https://android.googlesource.com/toolchain/m4",
+      "revision": "e0fa9d57f818d550ccef84d1520923f2a942f5ba"
+    }
+  ]
+}
