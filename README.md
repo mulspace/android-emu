@@ -143,3 +143,11 @@ not change system DNS or proxy services. Do not hard-code an old address in the 
 
 The API 24 resource-capture integration candidate and its remaining timeout limits
 are documented in [Kengent capture integration](docs/kengent-api24-capture.md).
+
+## Public App navigation acceptance
+
+Use [the bounded public journey probe](docs/public-journey-validation.md) to test
+launch, deterministic navigation and three strictly bound screenshots together.
+The current cold/warm end-to-end gate still fails; earlier successful settled
+screenshots do not establish production Stock readiness. Account collection
+requires the managed Stock App and trusted account Context.
