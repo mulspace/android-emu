@@ -1,0 +1,83 @@
+--- a/src/kengent/tools/resource_node/android.py
++++ b/src/kengent/tools/resource_node/android.py
+@@ -690,7 +690,7 @@
+         # acknowledgment also fences a delayed, not-yet-started adb command.
+         # Do not force-kill the owner: it may still be restoring a temporary
+         # clipboard value. Keep the generation occupied until its gate closes.
+-        result = await self.shell(launch + " close " + nonce, timeout=6)
++        result = await self.shell(launch + " close " + nonce, timeout=self.timing.cleanup_seconds)
+         if result.strip() != ("closed:" + nonce).encode():
+             raise ServiceFault(
+                 503,
+--- a/src/kengent/tools/resource_node/android_timing.py
++++ b/src/kengent/tools/resource_node/android_timing.py
+@@ -1,4 +1,4 @@
+-"""Explicit host-owned read timing; physical input deadlines are unchanged."""
++"""Explicit host-owned read/cleanup timing; input deadlines are unchanged."""
+ 
+ from dataclasses import dataclass
+ import re
+@@ -9,6 +9,7 @@
+     identity_seconds: int = 8
+     snapshot_seconds: int = 8
+     settle_seconds: int = 0
++    cleanup_seconds: int = 6
+ 
+ 
+ def timing_for(serial: str, profile: str = "standard") -> AndroidTiming:
+@@ -16,7 +17,7 @@
+         return AndroidTiming()
+     if profile != "arm-emulator" or not re.fullmatch(r"emulator-[0-9]{4,5}", serial):
+         raise ValueError("Extended Android read timing requires an explicit emulator locator")
+-    return AndroidTiming(identity_seconds=30, snapshot_seconds=30, settle_seconds=2)
++    return AndroidTiming(identity_seconds=30, snapshot_seconds=30, settle_seconds=2, cleanup_seconds=30)
+ 
+ 
+ def validate_profiles(profiles: object) -> dict[str, str]:
+--- a/tests/platform_services/test_resource_android_timing.py
++++ b/tests/platform_services/test_resource_android_timing.py
+@@ -21,9 +21,11 @@
+ 
+ def test_default_device_timing_and_explicit_profile():
+     assert timing_for("physical-usb").identity_seconds == 8
++    assert timing_for("physical-usb").cleanup_seconds == 6
+     assert timing_for("emulator-5576").snapshot_seconds == 8
+     profile = timing_for("emulator-5576", "arm-emulator")
+     assert (profile.identity_seconds, profile.snapshot_seconds, profile.settle_seconds) == (30, 30, 2)
++    assert profile.cleanup_seconds == 30
+     with pytest.raises(ValueError):
+         validate_profiles({"emulator-5576": 30})
+ 
+@@ -77,6 +79,32 @@
+     assert waits == [8, 30] and results[0] == results[1]
+ 
+ 
++@pytest.mark.asyncio
++@pytest.mark.parametrize("profile,deadline", [("standard", 6), ("arm-emulator", 30)])
++@pytest.mark.parametrize("acknowledged", [False, True])
++async def test_cleanup_profile_waits_for_same_nonce_ack_without_replaying(monkeypatch, profile, deadline, acknowledged):
++    transport = android.AdbTransport(adb_path="fixture", serial="emulator-5576", artifacts=(), timing_profile=profile)
++    calls = []
++    nonce = "a" * 32
++    async def verified():
++        pass
++    async def prepared(**kwargs):
++        assert kwargs == {"include_engine": False}
++        return "fixture-bridge"
++    async def shell(command, *, timeout):
++        calls.append((command, timeout))
++        return ("closed:" + (nonce if acknowledged else "b" * 32)).encode()
++    monkeypatch.setattr(transport, "verify", verified)
++    monkeypatch.setattr(transport, "prepare", prepared)
++    monkeypatch.setattr(transport, "shell", shell)
++    if acknowledged:
++        await transport.close_nonce(nonce)
++    else:
++        with pytest.raises(android.ServiceFault, match="generation tombstone"):
++            await transport.close_nonce(nonce)
++    assert calls == [("fixture-bridge close " + nonce, deadline)]
++
++
+ def test_long_snapshot_diagnostic_must_fit_observed_call():
+     timings = dict(guard_before_ms=6630, capture_ms=122, guard_after_ms=3511, encoding_ms=266, total_ms=10604)
+     assert android._snapshot_timings(timings, 10830) == timings

@@ -1,0 +1,17 @@
+{
+  "scope": "incremental on API24 input-readiness candidate; no production cutover",
+  "files": {
+    "src/kengent/tools/resource_node/android.py": {
+      "preimage_sha256": "c1dab6fbcaea9018c1acb8ac115ce449c182be62c9b9c4adb44fd8415b9e1de2",
+      "postimage_sha256": "c6b616b5af18ecb05f87a98f682cf3ac017e8b4a76280e9e3d4deeb17fcae072"
+    },
+    "src/kengent/tools/resource_node/android_timing.py": {
+      "preimage_sha256": "c46b18086d172c976200cfbd8ae74c1ee30a4c93bf47eb9139609e75a45c4db1",
+      "postimage_sha256": "4c9b328f26df071c3f74400ebe01dc876276e8bbc2fc15b94dfd8b08cc246068"
+    },
+    "tests/platform_services/test_resource_android_timing.py": {
+      "preimage_sha256": "47d66bdc7233d78aa4ac01a4a80947f246f4be75b1f9641df44d0d8baab49c58",
+      "postimage_sha256": "300306f05e9d7bef891482da10a7d1e9f04c03ebbde495dcd1ec0b6a38da0a45"
+    }
+  }
+}

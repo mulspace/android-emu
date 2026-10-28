@@ -245,3 +245,48 @@ its owned stop request (exit 0); both owned emulator/debugger processes and port
 Cold readiness and immediate page transitions still require validation. This
 does not establish authenticated broker assets/complete holdings or authorize
 Stock cutover. P30 remains outside the test scope.
+
+## Cold-start timing and cleanup acknowledgement
+
+A separate 621.32-second run used the same final bridge and two-core guest,
+stopped both test Apps, and launched Junhong exactly once. Android boot completed
+in 74.457 seconds. The broker process started at 02:10:36.550; ActivityManager
+reported MainScreen displayed at 02:12:09.867: 65.163 seconds for that Activity,
+93.503 seconds for the full launch chain. The initial guarded snapshot ran before
+that completion and exhausted the incomplete-tree read attempts. A later system
+screen showed the rendered public homepage. The captured ANR event buffer
+contained no `am_anr` record; this does not prove long-duration stability.
+
+A subsequent read-only root diagnostic found four valid roots (438, 278, 300,
+199 ms). Its null-root/window-query branch did not execute; window flags are not
+claimed as a fix. No system `uiautomator dump` was used to prime this run.
+With the final non-diagnostic bridge, three new public homepage captures passed
+in 13.027, 6.249 and 4.841 seconds, with cleanup acknowledged. All three original
+wire receipts also passed offline AndroidBackend validation. No host crash,
+account input, physical-device operation or production change was made.
+
+The failed cold probe's normal cleanup exceeded its six-second helper deadline.
+Its receipt deliberately remains failed/unconfirmed. A separate diagnostic used
+the **same nonce**, extended only cleanup waiting to 30 seconds, and obtained the
+exact close acknowledgement; the original generation was not replayed. The
+24.465-second total includes identity and artifact verification, not just the
+cleanup helper. An opt-in emulator profile now allows that 30-second cleanup
+wait. Physical/standard profiles retain six seconds; input/credential RPCs retain
+eight seconds. Pending cleanup continues to hold the generation until the exact
+nonce acknowledgement; no force-kill fallback or automatic input retry was added.
+
+[`kengent-arm-emulator-cleanup.patch`](../integration/kengent-arm-emulator-cleanup.patch)
+and its source hashes record the incremental fix. Its preimage apply check and
+87 focused timing/session regression tests passed. The later final-candidate
+capture session completed cleanup normally under this profile. Both the debugger
+and emulator exited with the owned stop request, and dedicated ports were checked
+free. Evidence and bridge artifacts remain private.
+
+Current acceptance: TDX symbol entry and dated daily chart plus repeatable warm
+Junhong homepage captures pass. The cold startup observation is a measured
+remaining limitation, not a completed cold-start adapter fix. Generic launch
+acknowledgement/foreground matching must not be treated as broker homepage or
+account readiness. Authenticated funds and complete holdings remain untested:
+this terminal has no managed tenant-app adapter/current request Context. Existing
+login consent does not supply that missing trusted transport. Do not switch Stock
+to this emulator until the real managed account acceptance succeeds.
