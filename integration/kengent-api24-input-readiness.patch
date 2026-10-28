@@ -1,0 +1,449 @@
+--- a/src/kengent/tools/resource_node/android.py
++++ b/src/kengent/tools/resource_node/android.py
+@@ -48,6 +48,8 @@
+     "snapshot_sensitive", "snapshot_stability", "snapshot_guard", "snapshot_encoding", "snapshot_history",
+     "observation_cache", "observation_identity", "observation_age",
+     "observation_foreground", "observation_geometry", "observation_session", "input_injection",
++    "text_arguments", "text_focus", "text_editable", "text_sensitive", "text_package",
++    "text_set", "text_fallback_prepare", "text_fallback_injection", "text_confirmation",
+ })
+ NATIVE_FAILURE_TYPES = frozenset({
+     "IllegalArgumentException", "IllegalStateException", "IllegalThreadStateException",
+--- a/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
++++ b/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
+@@ -178,7 +178,7 @@
+         }
+         for (int index = 0; index < node.getChildCount(); index++) {
+             AccessibilityNodeInfo child = node.getChild(index);
+-            if (child == null) throw new IllegalStateException();
++            if (child == null) throw new SnapshotCapture.IncompleteHierarchy();
+             try { sensitive(child, depth + 1, count, found); }
+             finally { child.recycle(); }
+         }
+@@ -209,7 +209,7 @@
+             xml = tree();
+             phase = "snapshot_sensitive";
+             AccessibilityNodeInfo root = automation.getRootInActiveWindow();
+-            if (root == null) throw new IllegalStateException();
++            if (root == null) throw new SnapshotCapture.IncompleteHierarchy();
+             sensitiveInputs = new JSONArray();
+             try { sensitive(root, 0, new int[]{0}, sensitiveInputs); }
+             finally { root.recycle(); }
+@@ -217,6 +217,8 @@
+             if (!pkg.equals(snapshotForeground()) || r != rotation()) throw new SnapshotCapture.UnstableSurface();
+             observation = new SnapshotCapture.Observation(pkg + ":" + w + ":" + h + ":" + r, xml, sensitiveInputs.length() != 0);
+             } catch (Exception error) {
++                if (error instanceof SnapshotForeground.MissingRoot)
++                    throw new OperationFailure(phase, new SnapshotCapture.IncompleteHierarchy());
+                 throw new OperationFailure(phase, error);
+             }
+         }
+@@ -318,6 +320,8 @@
+                         catch (OperationFailure error) {
+                             if (error.original instanceof SnapshotCapture.UnstableSurface)
+                                 throw (SnapshotCapture.UnstableSurface) error.original;
++                            if (error.original instanceof SnapshotCapture.IncompleteHierarchy)
++                                throw (SnapshotCapture.IncompleteHierarchy) error.original;
+                             throw error;
+                         }
+                         if (state[0].observation.sensitive)
+@@ -336,9 +340,25 @@
+                         return captured;
+                     }
+                     public void discard(Bitmap value) { value.recycle(); }
+-                    public void pause() { alive(); SystemClock.sleep(25L); alive(); }
++                    public void pause() {
++                        alive();
++                        observations[0] = 0;
++                        observationCost[0] = observationCost[1] = captureCost[0] = 0;
++                        captureDelay[0] = pixelsAt[0] = -1;
++                        SystemClock.sleep(25L); alive();
++                    }
+                 }, expected);
+-            } else state[0] = new SnapshotState();
++            } else state[0] = SnapshotCapture.complete(new SnapshotCapture.Read<SnapshotState>() {
++                public SnapshotState read() throws Exception {
++                    try { return new SnapshotState(); }
++                    catch (OperationFailure error) {
++                        if (error.original instanceof SnapshotCapture.IncompleteHierarchy)
++                            throw (SnapshotCapture.IncompleteHierarchy) error.original;
++                        throw error;
++                    }
++                }
++                public void pause() { alive(); SystemClock.sleep(25L); alive(); }
++            });
+             phase = "snapshot_geometry";
+             SnapshotState current = state[0];
+             if (image != null && (image.getWidth() != current.w || image.getHeight() != current.h))
+@@ -387,7 +407,7 @@
+             if (error.original instanceof SnapshotCapture.UnstableSurface)
+                 throw new OperationFailure("snapshot_stability", new IllegalStateException());
+             throw error;
+-        } catch (SnapshotCapture.UnstableSurface error) {
++        } catch (SnapshotCapture.UnstableSurface | SnapshotCapture.IncompleteHierarchy error) {
+             // Keep the existing finite, sanitized diagnostic contract after
+             // fresh-only recovery exhausts. No private exception text escapes.
+             throw new OperationFailure("snapshot_stability", new IllegalStateException());
+@@ -676,29 +696,47 @@
+             else if (name.equals("BACKSPACE")) key(KeyEvent.KEYCODE_DEL);
+             else throw new IllegalArgumentException();
+         } else if (op.equals("android.text")) {
++            String phase = "text_arguments";
++            try {
+             String text = args.getString("text");
+             if (text.length() < 1 || text.length() > 10000) throw new IllegalArgumentException();
+-            AccessibilityNodeInfo field = automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
++            phase = "text_focus";
++            AccessibilityNodeInfo field = InputFocus.read(new InputFocus.Port<AccessibilityNodeInfo>() {
++                public AccessibilityNodeInfo globalFocus() { return automation.findFocus(AccessibilityNodeInfo.FOCUS_INPUT); }
++                public AccessibilityNodeInfo activeRoot() { return automation.getRootInActiveWindow(); }
++                public AccessibilityNodeInfo focusIn(AccessibilityNodeInfo root) { return root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT); }
++                public String packageOf(AccessibilityNodeInfo node) { return String.valueOf(node.getPackageName()); }
++                public void recycle(AccessibilityNodeInfo node) { node.recycle(); }
++            }, android.os.Build.VERSION.SDK_INT, framePackage);
+             if (field == null) throw new IllegalStateException();
+             try {
+-                if (!field.isEditable() || !field.isFocused() || field.isPassword()
+-                        || !framePackage.contentEquals(field.getPackageName())) throw new IllegalStateException();
++                phase = "text_editable";
++                if (!field.isEditable()) throw new IllegalStateException();
++                phase = "text_focus";
++                if (!field.isFocused()) throw new IllegalStateException();
++                phase = "text_sensitive";
++                if (field.isPassword()) throw new IllegalStateException();
++                phase = "text_package";
++                if (!framePackage.contentEquals(field.getPackageName())) throw new IllegalStateException();
+                 Bundle value = new Bundle();
+                 value.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text);
+                 alive();
++                phase = "text_set";
+                 if (!field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, value)) {
+-                    String existing = field.getText() == null ? "" : field.getText().toString();
+-                    if (field.isShowingHintText() || (field.getHintText() != null && existing.contentEquals(field.getHintText()))) existing = "";
++                    phase = "text_fallback_prepare";
++                    String existing = TextFieldAccess.currentText(field, android.os.Build.VERSION.SDK_INT);
+                     // A few native/virtual fields do not implement SET_TEXT.
+                     // Replace only bounded ASCII in the already verified focus;
+                     // no clipboard, shell expansion, or arbitrary key RPC.
+                     if (!text.matches("[ -~]{1,32}") || !existing.matches("[ -~]{0,32}")) throw new IllegalStateException();
+                     KeyEvent[] events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray());
+                     if (events == null) throw new IllegalStateException();
++                    phase = "text_fallback_injection";
+                     key(KeyEvent.KEYCODE_MOVE_END);
+                     for (int i = 0; i < existing.length(); i++) key(KeyEvent.KEYCODE_DEL);
+                     for (KeyEvent event : events) { alive(); if (!automation.injectInputEvent(event, true)) throw new IllegalStateException(); }
+                 }
++                phase = "text_confirmation";
+                 boolean confirmed = false;
+                 for (int i = 0; i < 50; i++) {
+                     if (field.refresh() && text.contentEquals(field.getText())) { confirmed = true; break; }
+@@ -706,6 +744,7 @@
+                 }
+                 if (!confirmed) throw new IllegalStateException();
+             } finally { field.recycle(); }
++            } catch (Throwable error) { throw new OperationFailure(phase, error); }
+         } else throw new IllegalArgumentException();
+         return new JSONObject().put("frame_ref", accepted);
+     }
+--- a/src/kengent/tools/resource_node/native/SnapshotCapture.java
++++ b/src/kengent/tools/resource_node/native/SnapshotCapture.java
+@@ -7,6 +7,26 @@
+     /** Only a positively observed surface/rotation change, never a denied
+      * package, sensitive input, missing root or arbitrary capture failure. */
+     public static final class UnstableSurface extends IllegalStateException {}
++
++    /** A node vanished while reading a changing tree; never permission or sensitivity. */
++    public static final class IncompleteHierarchy extends IllegalStateException {}
++
++    public interface Read<T> {
++        T read() throws Exception;
++        void pause() throws Exception;
++    }
++
++    /** No image or input: retry only an incomplete tree within the original request. */
++    public static <T> T complete(Read<T> port) throws Exception {
++        for (int attempt = 0; attempt < 3; attempt++) {
++            try { return port.read(); }
++            catch (IncompleteHierarchy incomplete) {
++                if (attempt == 2) throw incomplete;
++                port.pause();
++            }
++        }
++        throw new IllegalStateException();
++    }
+ 
+     public static final class Observation {
+         public final String surface;
+@@ -58,7 +78,7 @@
+     public static <T> T stable(Port<T> port, Observation expected) throws Exception {
+         for (int attempt = 0; attempt < 3; attempt++) {
+             try { return capture(port, expected); }
+-            catch (UnstableSurface changed) {
++            catch (UnstableSurface | IncompleteHierarchy changed) {
+                 if (expected != null || attempt == 2) throw changed;
+                 port.pause();
+             }
+--- a/src/kengent/tools/resource_node/native/SnapshotForeground.java
++++ b/src/kengent/tools/resource_node/native/SnapshotForeground.java
+@@ -3,6 +3,8 @@
+ /** Snapshot-only recovery for a momentarily absent accessibility root. */
+ public final class SnapshotForeground {
+     private SnapshotForeground() {}
++
++    public static final class MissingRoot extends IllegalStateException {}
+ 
+     public interface Port {
+         void check() throws Exception;
+@@ -24,6 +26,6 @@
+             // stale lease or any physical input. No pixels are captured here.
+             if (attempt < 3) port.pause(25L);
+         }
+-        throw new IllegalStateException();
++        throw new MissingRoot();
+     }
+ }
+--- a/tests/platform_services/test_resource_android.py
++++ b/tests/platform_services/test_resource_android.py
+@@ -161,6 +161,10 @@
+     *[(phase, "android.tap") for phase in (
+         "observation_cache", "observation_identity", "observation_age",
+         "observation_foreground", "observation_geometry", "observation_session", "input_injection",
++    )],
++    *[(phase, "android.text") for phase in (
++        "text_arguments", "text_focus", "text_editable", "text_sensitive", "text_package",
++        "text_set", "text_fallback_prepare", "text_fallback_injection", "text_confirmation",
+     )],
+ ])
+ async def test_native_command_failures_preserve_fixed_diagnostics_without_replaying_input(tmp_path, caplog, phase, operation):
+--- a/tests/platform_services/test_resource_snapshot_guard.py
++++ b/tests/platform_services/test_resource_snapshot_guard.py
+@@ -472,6 +472,32 @@
+         check(denied.observations==1&&denied.captures==0&&denied.pauses==0);
+         Port unknown=new Port(new IllegalStateException());rejected(unknown,null);
+         check(unknown.observations==1&&unknown.captures==0&&unknown.pauses==0);
++        Port vanished=new Port(game,new SnapshotCapture.IncompleteHierarchy(),game,game);
++        check(SnapshotCapture.stable(vanished,null).equals("pixels-2"));
++        check(vanished.captures==2&&vanished.discards==1&&vanished.pauses==1);
++        Port vanishedExpected=new Port(game,new SnapshotCapture.IncompleteHierarchy());
++        rejected(vanishedExpected,game);
++        check(vanishedExpected.captures==1&&vanishedExpected.discards==1&&vanishedExpected.pauses==0);
++        Port secretAfterVanishing=new Port(game,new SnapshotCapture.IncompleteHierarchy(),sensitive);
++        rejected(secretAfterVanishing,null);
++        check(secretAfterVanishing.captures==1&&secretAfterVanishing.discards==1&&secretAfterVanishing.pauses==1);
++        Port alwaysMissing=new Port(new SnapshotCapture.IncompleteHierarchy(),new SnapshotCapture.IncompleteHierarchy(),new SnapshotCapture.IncompleteHierarchy());
++        rejected(alwaysMissing,null);
++        check(alwaysMissing.observations==3&&alwaysMissing.captures==0&&alwaysMissing.pauses==2);
++        int[] reads={0};
++        String plain=SnapshotCapture.complete(new SnapshotCapture.Read<String>() {
++            public String read() { if(++reads[0]<3)throw new SnapshotCapture.IncompleteHierarchy();return "complete"; }
++            public void pause() {}
++        });
++        check(plain.equals("complete")&&reads[0]==3);
++        reads[0]=0;
++        try {
++            SnapshotCapture.complete(new SnapshotCapture.Read<String>() {
++                public String read() { reads[0]++;throw new SecurityException(); }
++                public void pause() { throw new AssertionError(); }
++            });
++            throw new AssertionError();
++        } catch(SecurityException expectedError) { check(reads[0]==1); }
+         Port bounded=new Port(new SnapshotCapture.UnstableSurface(),new SnapshotCapture.UnstableSurface(),new SnapshotCapture.UnstableSurface());
+         rejected(bounded,null);check(bounded.observations==3&&bounded.captures==0&&bounded.pauses==2);
+         Port fenced=new Port(new SnapshotCapture.UnstableSurface());fenced.expired=true;rejected(fenced,null);
+--- a/tests/platform_services/test_resource_snapshot_foreground.py
++++ b/tests/platform_services/test_resource_snapshot_foreground.py
+@@ -56,7 +56,7 @@
+     ('ready', 'game checks=1 reads=1 pauses=0 elapsed=0'),
+     ('recover', 'game checks=2 reads=2 pauses=1 elapsed=25'),
+     ('recover_last', 'game checks=4 reads=4 pauses=3 elapsed=75'),
+-    ('missing', 'IllegalStateException checks=4 reads=4 pauses=3 elapsed=75'),
++    ('missing', 'MissingRoot checks=4 reads=4 pauses=3 elapsed=75'),
+     ('denied', 'SecurityException checks=1 reads=1 pauses=0 elapsed=0'),
+     ('denied_after_null', 'SecurityException checks=2 reads=2 pauses=1 elapsed=25'),
+     ('expired', 'IllegalStateException checks=1 reads=0 pauses=0 elapsed=0'),
+--- /dev/null
++++ b/src/kengent/tools/resource_node/native/InputFocus.java
+@@ -0,0 +1,31 @@
++package club.lang.resources;
++
++/** Android 7 can omit global focus while the active window owns a focused field. */
++public final class InputFocus {
++    private InputFocus() {}
++
++    public interface Port<T> {
++        T globalFocus() throws Exception;
++        T activeRoot() throws Exception;
++        T focusIn(T root) throws Exception;
++        String packageOf(T node);
++        void recycle(T node);
++    }
++
++    public static <T> T read(Port<T> port, int sdk, String expectedPackage) throws Exception {
++        if (sdk < 24 || expectedPackage == null || expectedPackage.isEmpty()) throw new IllegalArgumentException();
++        T field = port.globalFocus();
++        if (field != null || sdk >= 26) return field;
++        T root = port.activeRoot();
++        if (root == null) return null;
++        try {
++            if (!expectedPackage.equals(port.packageOf(root))) throw new SecurityException();
++            T local = port.focusIn(root);
++            if (local != null && !expectedPackage.equals(port.packageOf(local))) {
++                port.recycle(local);
++                throw new SecurityException();
++            }
++            return local;
++        } finally { port.recycle(root); }
++    }
++}
+--- /dev/null
++++ b/src/kengent/tools/resource_node/native/TextFieldAccess.java
+@@ -0,0 +1,25 @@
++package club.lang.resources;
++
++import android.view.accessibility.AccessibilityNodeInfo;
++
++/** Read existing text without linking Android 8 hint APIs on Android 7. */
++public final class TextFieldAccess {
++    private TextFieldAccess() {}
++
++    public static String currentText(AccessibilityNodeInfo field, int sdk) {
++        if (field == null || sdk < 24) throw new IllegalArgumentException();
++        CharSequence value = field.getText();
++        String existing = value == null ? "" : value.toString();
++        if (sdk >= 26 && Api26.isHint(field, existing)) return "";
++        // Older nodes cannot prove a string is only a hint. Preserve it so
++        // the bounded ASCII replacement gate can reject ambiguous contents.
++        return existing;
++    }
++
++    private static final class Api26 {
++        static boolean isHint(AccessibilityNodeInfo field, String existing) {
++            CharSequence hint = field.getHintText();
++            return field.isShowingHintText() || hint != null && existing.contentEquals(hint);
++        }
++    }
++}
+--- /dev/null
++++ b/tests/platform_services/test_resource_input_focus.py
+@@ -0,0 +1,54 @@
++"""Legacy focus lookup stays within the observed active package and never inputs."""
++from pathlib import Path
++import shutil
++import subprocess
++
++import pytest
++
++NATIVE = Path(__file__).resolve().parents[2] / "src/kengent/tools/resource_node/native"
++
++
++def test_legacy_focus_fallback_preserves_scope_and_recycles_all_roots(tmp_path):
++    if not shutil.which("javac") or not shutil.which("java"):
++        pytest.skip("JDK required")
++    probe = tmp_path / "FocusProbe.java"
++    probe.write_text('''import club.lang.resources.InputFocus;
++public class FocusProbe implements InputFocus.Port<String> {
++    String mode; int roots, focused, recycled;
++    FocusProbe(String mode) { this.mode=mode; }
++    public String globalFocus() {
++        if(mode.equals("error"))throw new IllegalStateException();
++        return mode.equals("global")?"global":null;
++    }
++    public String activeRoot() { roots++;return mode.equals("missing")?null:"root"; }
++    public String focusIn(String root) { focused++;return mode.equals("no_focus")?null:"local"; }
++    public String packageOf(String node) {
++        return (mode.equals("foreign_root")&&node.equals("root") || mode.equals("foreign_field")&&node.equals("local"))?"foreign":"allowed";
++    }
++    public void recycle(String node) { recycled++; }
++    static void check(boolean value) { if(!value)throw new AssertionError(); }
++    static void test(String mode,int sdk,String expected,int roots,int focused,int recycled) throws Exception {
++        FocusProbe p=new FocusProbe(mode);String result;
++        try { result=InputFocus.read(p,sdk,"allowed"); }
++        catch(Exception e) { result=e.getClass().getSimpleName(); }
++        check(java.util.Objects.equals(result,expected));
++        check(p.roots==roots&&p.focused==focused&&p.recycled==recycled);
++    }
++    public static void main(String[] args) throws Exception {
++        test("global",24,"global",0,0,0);
++        test("local",24,"local",1,1,1);
++        test("local",25,"local",1,1,1);
++        test("local",26,null,0,0,0);
++        test("missing",24,null,1,0,0);
++        test("no_focus",24,null,1,1,1);
++        test("foreign_root",24,"SecurityException",1,0,1);
++        test("foreign_field",24,"SecurityException",1,1,2);
++        test("error",24,"IllegalStateException",0,0,0);
++        System.out.println("legacy focus scope passed");
++    }
++}''')
++    subprocess.run(["javac", "-d", str(tmp_path), str(NATIVE / "InputFocus.java"), str(probe)],
++                   check=True, capture_output=True, timeout=30)
++    result = subprocess.run(["java", "-cp", str(tmp_path), "FocusProbe"],
++                            check=True, capture_output=True, text=True, timeout=5)
++    assert result.stdout.strip() == "legacy focus scope passed"
+--- /dev/null
++++ b/tests/platform_services/test_resource_text_field_access.py
+@@ -0,0 +1,64 @@
++"""Run the real shim with an API24 class that lacks the API26 methods entirely."""
++from pathlib import Path
++import shutil
++import subprocess
++
++import pytest
++
++NATIVE = Path(__file__).resolve().parents[2] / "src/kengent/tools/resource_node/native"
++
++
++@pytest.fixture(scope="module")
++def compiled_text_access(tmp_path_factory):
++    if not shutil.which("javac") or not shutil.which("java"):
++        pytest.skip("JDK required")
++    root = tmp_path_factory.mktemp("text-access")
++    stub = root / "android/view/accessibility/AccessibilityNodeInfo.java"
++    stub.parent.mkdir(parents=True)
++    base = '''package android.view.accessibility;
++public class AccessibilityNodeInfo {
++  public CharSequence getText() { return System.getProperty("value"); }
++%s
++}
++'''
++    stub.write_text(base % '''public CharSequence getHintText() { return System.getProperty("hint"); }
++public boolean isShowingHintText() { return Boolean.getBoolean("isHint"); }''')
++    probe = root / "TextProbe.java"
++    probe.write_text('''import club.lang.resources.TextFieldAccess;
++import android.view.accessibility.AccessibilityNodeInfo;
++public class TextProbe {
++  public static void main(String[] args) {
++    System.out.print(TextFieldAccess.currentText(new AccessibilityNodeInfo(), Integer.parseInt(args[0])));
++  }
++}''')
++    subprocess.run(["javac", "-d", str(root / "new"), str(stub), str(NATIVE / "TextFieldAccess.java"), str(probe)],
++                   check=True, capture_output=True, timeout=30)
++    # Compile a runtime class which literally has no hint methods. Loading
++    # those methods on API24 would throw NoSuchMethodError in this test.
++    stub.write_text(base % "")
++    subprocess.run(["javac", "-d", str(root / "old"), str(stub)], check=True, capture_output=True, timeout=30)
++    return root
++
++
++@pytest.mark.parametrize("sdk,value,hint,is_hint,expected", [
++    (24, "600999", "600999", True, "600999"),
++    (25, "股票代码/名称", "股票代码/名称", True, "股票代码/名称"),
++    (24, None, None, False, ""),
++    (26, "hint", "hint", False, ""),
++    (26, "placeholder", None, True, ""),
++    (35, "600999", "search", False, "600999"),
++])
++def test_existing_text_preserved_unless_supported_hint_evidence_proves_empty(
++    compiled_text_access, sdk, value, hint, is_hint, expected,
++):
++    root = compiled_text_access
++    properties = [f"-DisHint={str(is_hint).lower()}"]
++    if value is not None:
++        properties.append(f"-Dvalue={value}")
++    if hint is not None:
++        properties.append(f"-Dhint={hint}")
++    classpath = f"{root / 'old'}:{root / 'new'}" if sdk < 26 else str(root / "new")
++    result = subprocess.run(["java", *properties, "-cp", classpath, "TextProbe", str(sdk)],
++                            check=True, capture_output=True, text=True, timeout=5)
++    assert result.stdout == expected
++    assert result.stderr == ""

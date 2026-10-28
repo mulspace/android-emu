@@ -1,0 +1,49 @@
+{
+  "scope": "incremental on the documented timing candidate; no production cutover",
+  "files": {
+    "src/kengent/tools/resource_node/android.py": {
+      "preimage_sha256": "604a6e9075da0b0a6229f961c3a08779b212d7e8a8bd6c48ad4a508fc81046f2",
+      "postimage_sha256": "c1dab6fbcaea9018c1acb8ac115ce449c182be62c9b9c4adb44fd8415b9e1de2"
+    },
+    "src/kengent/tools/resource_node/native/ResourceDeviceBridge.java": {
+      "preimage_sha256": "9ea81ecb48b9feefce82cd715d264289f4c852f03057e8923d813c8cffd66a99",
+      "postimage_sha256": "cfd1ccac7c8eb572997fb62b9cc0d53308ca7afea9921c09033a0af1f8c56906"
+    },
+    "src/kengent/tools/resource_node/native/SnapshotCapture.java": {
+      "preimage_sha256": "18cb05bbd6664664984f2af35503d28f62e2e9331f32e17eced5b51b06631138",
+      "postimage_sha256": "00b5184fb8211ca543193eeb861ac9cc2f98c3bed205e77358afbed68175bacc"
+    },
+    "src/kengent/tools/resource_node/native/SnapshotForeground.java": {
+      "preimage_sha256": "f7ebd1efd9f18035d6ffed08e7111f2e9e7cce2494240921b64d190e6314ed53",
+      "postimage_sha256": "465f6bedc1774b4d142ee655a6e3d0c86863b3a07b680472d5c183d989897dcc"
+    },
+    "tests/platform_services/test_resource_android.py": {
+      "preimage_sha256": "d439b4d034a49eb3f695e45cb29371a59d563ae494890aebb190faa75aa29474",
+      "postimage_sha256": "b361783422653a97e046109acbc0c1d9045a4db12e4027c257a1de1c6d94f9c8"
+    },
+    "tests/platform_services/test_resource_snapshot_guard.py": {
+      "preimage_sha256": "b60c13ee99560835c64883e4d4099404d2fe50c5f357aeffb3f2b490bb14117b",
+      "postimage_sha256": "69280992b586d818a02390ccfea17f3e889506721561ed52502ae5254afdd1ec"
+    },
+    "tests/platform_services/test_resource_snapshot_foreground.py": {
+      "preimage_sha256": "dc050c1fd29b3d5a3a779d0a3c61229df65bd5cc62a083abcc8099537873b957",
+      "postimage_sha256": "6566c3ed625e634ad2c0cba902afcff2f3c165cfb14b444311394a6949f6a84c"
+    },
+    "src/kengent/tools/resource_node/native/InputFocus.java": {
+      "preimage_sha256": null,
+      "postimage_sha256": "36ae862611a6601e192974c2f2157c786afe1125127bbc086022ce6eb723bd13"
+    },
+    "src/kengent/tools/resource_node/native/TextFieldAccess.java": {
+      "preimage_sha256": null,
+      "postimage_sha256": "7960331d85012614b689a3c0b23304cbe45fab1f035ff0faca9e7828232627e0"
+    },
+    "tests/platform_services/test_resource_input_focus.py": {
+      "preimage_sha256": null,
+      "postimage_sha256": "6a970880edfe1782ed1b17cc53329f42f58c1f9af449cad5d289ddf4570dd4f4"
+    },
+    "tests/platform_services/test_resource_text_field_access.py": {
+      "preimage_sha256": null,
+      "postimage_sha256": "420296cf8694f4d22dabb3c2c3f92479942419b6502bbe90b1218c2ba92d0359"
+    }
+  }
+}

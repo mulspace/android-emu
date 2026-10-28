@@ -191,3 +191,57 @@ Its finally path stopped the owned GDB/emulator group (GDB exit 0); process and
 ports 5576/5577 were verified released. This was an interrupted diagnostic run,
 not proof of an emulator crash or a completed full acceptance test. A later public
 history-navigation attempt was refused by the ended-run guard before device IO.
+
+## Android 7 input focus and complete-tree capture
+
+The public TDX symbol entry failure was localized without logging input contents:
+the global accessibility focus was absent, while the active window returned a
+focused editable node. The API 24/25 candidate now falls back to that window's
+focus only when global focus is null. Both the root and field must belong to the
+package from the current observation. Existing focused/editable/password checks,
+single-use observation, deadlines and input confirmation remain unchanged. It
+does not choose an arbitrary text field, change focus or replay an uncertain input.
+
+Hint-text methods were added in Android API 26. The candidate isolates these in
+an API 26 helper; Android 7 preserves existing text rather than guessing whether
+it is a placeholder. Tests run against a legacy stub that lacks those methods.
+See the [Android AccessibilityNodeInfo reference](https://developer.android.com/reference/android/view/accessibility/AccessibilityNodeInfo#isShowingHintText()).
+
+During page transitions, missing roots/children now have a distinct incomplete
+hierarchy result. Fresh read-only snapshots may re-read at most three times in
+the original request. Any captured image is discarded before retrying. Sensitive
+fields, denied packages, arbitrary errors and expected-frame input checks do not
+retry. Native diagnostics contain fixed operation phases and exception types,
+never input values or exception messages. Accepted-attempt timing counters reset
+after a discarded attempt; total duration still includes all work.
+
+The incremental candidate is
+[`kengent-api24-input-readiness.patch`](../integration/kengent-api24-input-readiness.patch),
+with exact pre/post hashes in its `.sources.json` file. It applies on the previous
+documented timing candidate and local snapshot implementation, not clean Kengent
+HEAD alone. A preimage apply check passed. Private diagnostic logging and unrelated
+Kengent edits are excluded; no production service or binding has been changed.
+
+Live results on the isolated ARM32 two-core guest (default JNI checks):
+
+| Case | Result | Snapshot wall seconds |
+| --- | --- | --- |
+| Window-focus text input | One `600999` operation acknowledged and read back; exact 招商证券 search result | 3.578, 2.736 |
+| Search result to quote | One tap acknowledged; immediate snapshot exceeded 30 seconds; tap was not replayed | Transition timeout |
+| Settled quote/daily K with final candidate | Three consecutive guarded captures, cleanup acknowledged | 13.694, 9.057, 4.882 |
+
+The retained daily chart shows code 600999, a selected 日K tab, candles through
+2026-10-28, volume and MACD. It is overnight historical-market evidence, not a
+claim of a new trading-day live price. The five successful search/daily wire
+receipts passed the actual AndroidBackend's offline protocol, hierarchy,
+sensitive-field and image checks. No device or network access occurs in replay.
+The final DEX 037 bridge SHA-256 is
+`9141326bf5e0984aaa9ce39a59dc735d680e56e0ef3033ed93d4452ae8b92e4a`.
+
+119 focused regression tests passed. The 1456.48-second diagnostic run ended via
+its owned stop request (exit 0); both owned emulator/debugger processes and ports
+5576/5577 were verified released. Raw logs, screenshots and JARs stay private.
+
+Cold readiness and immediate page transitions still require validation. This
+does not establish authenticated broker assets/complete holdings or authorize
+Stock cutover. P30 remains outside the test scope.
