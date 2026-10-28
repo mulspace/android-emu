@@ -8,7 +8,9 @@ patches, build tools and sanitized findings are maintained in this repository.
 
 The original host SIGILL and deleted-buffer failures have source-level fixes
 and symbolized builds. Current work targets cold startup and repeatable guarded
-capture with unmodified Junhong/TongdaXin ARM32 APKs. TongdaXin public daily
+capture with unmodified Junhong/TongdaXin ARM32 APKs. The latest
+[missing-node investigation](docs/incomplete-hierarchy-diagnostics.md) records
+failed repeatability checks and an opt-in, identity-preserving recovery probe. TongdaXin public daily
 candles and three strictly paired Junhong public-market captures have passed
 on the isolated test device. Cold-start ANRs remain; complete authenticated
 funds/holdings capture and production cutover are **not** established.

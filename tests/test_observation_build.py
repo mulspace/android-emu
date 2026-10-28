@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from build_observation_probe import retry_incomplete_checked, hierarchy_retry_delay
+from build_observation_probe import retry_incomplete_checked, hierarchy_retry_delay, mismatch_diagnostics
 
 class CheckedBuild(unittest.TestCase):
     def test_rejects_source_drift_or_ambiguous_transformation(self):
@@ -21,3 +21,7 @@ class CheckedBuild(unittest.TestCase):
         for delay in (-1, 0, 2000):
             with self.assertRaises(ValueError): hierarchy_retry_delay(source, delay)
         with self.assertRaises(ValueError): hierarchy_retry_delay(source.replace(pause, "", 2), 1000)
+
+    def test_mismatch_diagnostics_reject_missing_or_ambiguous_source(self):
+        for source in ("", "        public final String phase;\n        Mismatch(" * 2):
+            with self.assertRaises(ValueError): mismatch_diagnostics(source)
