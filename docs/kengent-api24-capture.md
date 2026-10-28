@@ -70,3 +70,44 @@ that those other changes were deployed or that this patch alone passes live acce
 Do not automatically deploy this patch or switch device bindings.
 
 Raw logs, APKs, JARs, user data and screenshots remain in private local test storage.
+
+## Offline ANR evidence
+
+A read-only raw copy of the stopped test userdata was inspected with debugfs.
+The preserved ANR reason was execution of Junhong AppwidgetUpdateService. Its
+main-thread stack was runnable in JSONTokener/JSONArray while loading the home
+navigation menu, not blocked in a network read or monitor. Main-thread schedstat
+showed about 8.05 seconds running and 31.80 seconds queued since thread creation;
+these are cumulative counters, not the duration of this single method.
+During the 14.2-second system sampling interval, Junhong used 41% guest CPU,
+background Tongdaxin 25%, and system_server 18%. This supports testing background
+competition, but does not yet establish a causal speedup. The raw disk, dropbox
+report and traces remain private and were not committed.
+
+## Single-App public capture comparison
+
+A subsequent 600.21-second run explicitly stopped both test Apps and launched
+Junhong once. A process check found no Tongdaxin process. The public home screen
+rendered; retained events showed a System UI boot ANR but no Junhong ANR in that
+sample. MainScreen Activity timing was 61.629 seconds (92.610 seconds for the
+complete launch chain), so this does not establish faster cold startup.
+
+An early bridge probe and a second probe after the home screen appeared still
+returned an absent accessibility root. The system's separate `uiautomator dump`
+then returned 71 compressed nodes, all belonging to Junhong, proving that the
+public tree was available through the platform path. Two seconds of diagnostic
+post-initialization waiting alone did not pass the normal eight-second RPC bound.
+
+With that same two-second wait and a **diagnostic-only 30-second RPC deadline**,
+the unchanged validation path returned the actual public home screenshot and
+hierarchy in 10.830 seconds. Native timings: guard-before 6630 ms, capture 122 ms,
+guard-after 3511 ms, encoding 266 ms, total 10604 ms. The ADB shell timeout was
+also extended to 30 seconds only in this private probe, as documented above.
+No foreground, sensitive-field, nonce or response check was removed. Cleanup was
+acknowledged. This demonstrates one valid response beyond the existing deadline;
+it does not prove three repeatable captures, authenticated assets collection,
+or a suitable production latency policy. No default timeout has been changed.
+
+Next work: make cold readiness and emulator-specific bounded read timeouts
+explicit, profile redundant observation work without weakening guards, then
+repeat public captures before an authorized managed funds/holdings test.
