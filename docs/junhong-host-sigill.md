@@ -4,7 +4,9 @@
 
 Reproduced under GDB in a new, isolated ARM32 AVD on the same Linux x86-64
 host. The 16-bit reset-offset overflow is now confirmed with source symbols.
-The candidate fix compiles; post-fix application validation is still in progress. The pinned Clang 12.0.5 C/C++ compile-and-link checks and CMake configuration
+Both the TCG fix and a subsequent deleted-vertex-buffer fix now compile. The
+broker ordinary-account landing page renders after the fixes; full account
+collection and repeatability validation remain incomplete. The pinned Clang 12.0.5 C/C++ compile-and-link checks and CMake configuration
 now pass. The first Debug build completed all 5755 steps in 761.53 seconds;
 its ARM32 headless ELF has .debug_info and .debug_line sections. Large official downloads were
 completed through directory/file fallbacks and a per-request verified Google IP,
@@ -148,8 +150,58 @@ The same navigation also crashes with bundled `swiftshader_indirect`: the render
 thread reaches `memcpy` in its GLES library at address 0x2c8 through the same
 translator draw call. This rules out an AMD/Mesa-only explanation. A private,
 reversible diagnostic overlay records vertex-buffer state without suppressing
-draws, changing the guest APK, or ignoring signals. No graphics fix is yet proven.
+draws, changing the guest APK, or ignoring signals. The source and focused regression were subsequently corrected as described below.
 Until the broker page and repeated collection work, production cutover is blocked. App startup
 also produced an ANR while the main thread parsed its WebView-domain JSON
 configuration; it resumed after one explicit Wait action. This performance issue
 is recorded separately from the emulator crash.
+
+
+## Confirmed deleted-vertex-buffer defect and fix
+
+A bounded diagnostic capture linked the failing draw to a prior deletion in the
+same GLES 2 context:
+
+- `glDeleteBuffers` detached local buffer 5 from indexed bindings.
+- Attribute 1 still reported legacy buffer 5 and offset 712; its indexed binding
+  and global buffer mapping were both zero.
+- The host driver therefore received a client pointer `0x2c8` instead of a valid
+  VBO offset. The previous run showed the identical mismatch at `0x388`.
+
+The translator maintained two inconsistent views of the same vertex attribute.
+The second patch detaches the deleted buffer from the current VAO's legacy
+pointer records as well as indexed bindings. It preserves enabled/format state
+and the original offset for queries. The existing missing-client-data path can
+then temporarily disable an unavailable array rather than dereferencing a guest
+buffer offset as host memory. Other VAOs are not cleared; valid client arrays and
+live VBOs retain their existing paths. No drawing command is globally suppressed.
+
+A focused upstream GL test failed before the fix (deleted binding incorrectly
+reported as 1). After the fix it passes, checking binding=0, enabled=1, retained
+offset=8 and an actual green pixel after drawing. It passes using both bundled
+SwiftShader and host AMD/Mesa. The standalone fixture uses a GLES 2 context and
+initializes EGL before setting its maximum version; earlier fixture setup errors
+are retained privately and are not counted as reproduction evidence.
+
+The source patch contains the regression. A 32-file exact-hash validation passed,
+as did fresh dry-run, upgrade of an existing TCG-only checkout, and idempotent
+reapplication. Eleven Python tooling tests passed. The corrected render library
+SHA-256 is `2fda01a1d0d2e1db9670b726d9ee7cec9b40f6a947eaa1751849439b1eacb011`;
+the ARM engine SHA remains the TCG-fixed value above. Temporary logging probes
+have been removed from the tested candidate.
+
+With both fixes, the real, unchanged broker APK displayed the complete ordinary-
+account landing page, including holdings and query navigation, without either
+prior host crash. This is a logged-out UI check, **not** verified funds/holdings
+capture. ARM software translation is still slow: one navigation command exceeded
+25 seconds even though the requested tab appeared later; it was inspected instead
+of blindly resubmitted. Production Stock binding, P30, Scheduler and services
+remain unchanged.
+
+The holdings entry also opened the broker's first-login flow. It presents a
+phone-number/SMS-code registration/login form in this isolated guest, not an
+already authenticated trading account. No phone number, SMS request, account ID
+or password was submitted. Managed full-account testing additionally needs a
+current tenant-app request Context and approved broker binding; neither is
+provided to this terminal session. Do not replace that missing managed context
+with operator credentials or a guessed account/device binding.

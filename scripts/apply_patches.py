@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the reviewed patch only to the exact pinned source, with a build lock."""
+"""Apply reviewed patch sets to exact pinned source, preserving prior fixes."""
 import argparse
 import fcntl
 import hashlib
@@ -8,7 +8,6 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-PATCH = ROOT / "patches/0001-tcg-bound-translation-blocks.patch"
 
 
 def source_state(source, manifest=None):
@@ -31,6 +30,27 @@ def source_state(source, manifest=None):
     return states.pop()
 
 
+def reviewed_patches(source, manifest, patch_root=ROOT / "patches"):
+    """Check all inputs before any mutation; allow completed earlier patch sets."""
+    plan = []
+    covered = set()
+    for entry in manifest["patches"]:
+        path = (patch_root / entry["path"]).resolve()
+        if not path.is_relative_to(patch_root.resolve()):
+            raise ValueError("Patch path escapes patch root")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
+            raise ValueError("Patch checksum does not match reviewed manifest")
+        names = entry["files"]
+        if not names or covered.intersection(names) or len(set(names)) != len(names):
+            raise ValueError("Patch sets must cover distinct source files")
+        covered.update(names)
+        state = source_state(source, {"files": {name: manifest["files"][name] for name in names}})
+        plan.append((path, state))
+    if covered != set(manifest["files"]):
+        raise ValueError("Patch sets do not cover the full source manifest")
+    return plan
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workspace", type=Path, required=True)
@@ -39,20 +59,23 @@ def main():
     workspace = args.workspace.resolve()
     source = workspace / "aosp/external/qemu"
     manifest = json.loads((ROOT / "patches/series.json").read_text())
-    if hashlib.sha256(PATCH.read_bytes()).hexdigest() != manifest["patch_sha256"]:
-        raise ValueError("Patch checksum does not match reviewed manifest")
     with (workspace / ".source.lock").open("a+") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        state = source_state(source, manifest)
-        command = ["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-d", str(source), "-i", str(PATCH)]
-        if state == "unpatched":
+        plan = reviewed_patches(source, manifest)
+        commands = [["patch", "--batch", "--forward", "--fuzz=0", "-p1", "-d", str(source), "-i", str(path)]
+                    for path, state in plan if state == "unpatched"]
+        for command in commands:
             subprocess.run(command + ["--dry-run"], check=True, timeout=30)
-            if not args.check:
-                # Every source hash and hunk was checked before the first write.
+        if not args.check:
+            # Every source hash and hunk was checked before the first write.
+            for command in commands:
                 subprocess.run(command, check=True, timeout=30)
-                state = source_state(source, manifest)
+            state = source_state(source, manifest)
+        else:
+            states = {state for _, state in plan}
+            state = states.pop() if len(states) == 1 else "partially-patched"
         print(json.dumps({"source_state": state, "check_only": args.check,
-                          "patch_sha256": manifest["patch_sha256"]}))
+                          "pending_patch_sets": len(commands)}))
 
 
 if __name__ == "__main__":

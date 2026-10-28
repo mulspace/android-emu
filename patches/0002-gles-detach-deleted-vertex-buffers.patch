@@ -1,0 +1,172 @@
+--- a/android/android-emugl/host/libs/Translator/include/GLcommon/GLESpointer.h
++++ b/android/android-emugl/host/libs/Translator/include/GLcommon/GLESpointer.h
+@@ -64,6 +64,7 @@
+                    bool isInt = false);
+     // setValue is used when glVertexAttrib*f(v) is called
+     void setValue(unsigned int count, const GLfloat* val);
++    void detachBuffer(GLuint bufferName);
+     void setDivisor(GLuint divisor);
+     void setBindingIndex(GLuint bindingindex);
+     void setFormat(GLint size, GLenum type,
+--- a/android/android-emugl/host/libs/Translator/GLcommon/GLESpointer.cpp
++++ b/android/android-emugl/host/libs/Translator/GLcommon/GLESpointer.cpp
+@@ -147,6 +147,15 @@
+     m_buffer = nullptr;
+ }
+ 
++void GLESpointer::detachBuffer(GLuint bufferName) {
++    if (bufferName && m_attribType == BUFFER && m_bufferName == bufferName) {
++        // A guest buffer offset is not a host client-array pointer. Preserve
++        // the offset/format for queries, but invalidate the deleted data source.
++        m_buffer = nullptr;
++        m_bufferName = 0;
++    }
++}
++
+ void GLESpointer::setDivisor(GLuint divisor) {
+     m_divisor = divisor;
+ }
+--- a/android/android-emugl/host/libs/Translator/GLcommon/GLEScontext.cpp
++++ b/android/android-emugl/host/libs/Translator/GLcommon/GLEScontext.cpp
+@@ -1321,6 +1321,19 @@
+     if (m_shaderStorageBuffer == buffer)
+         m_shaderStorageBuffer = 0;
+ 
++    // Keep the legacy pointer view in sync with indexed bindings. Otherwise
++    // client-array setup mistakes a deleted VBO for a live one and forwards
++    // its byte offset to the host driver as a client memory address.
++    if (m_currVaoState.it->second.legacy) {
++        for (auto& item : *m_currVaoState.it->second.arraysMap) {
++            item.second->detachBuffer(buffer);
++        }
++    } else {
++        for (auto& pointer : m_currVaoState.attribInfo()) {
++            pointer.detachBuffer(buffer);
++        }
++    }
++
+     // One might think that indexed buffer bindings for transform feedbacks
+     // must be cleared as well, but transform feedbacks are
+     // considered GL objects with attachments, so even if the buffer is
+--- a/android/android-emugl/host/libs/Translator/GLES_V2/GLESv2Imp.cpp
++++ b/android/android-emugl/host/libs/Translator/GLES_V2/GLESv2Imp.cpp
+@@ -3008,8 +3008,8 @@
+ 
+     const GLESpointer* p = ctx->getPointer(index);
+     if (p) {
+-        if (p->getBufferName() == 0) {
+-            // vertex attrib has no buffer, return array data pointer
++        if (p->getBufferName() == 0 && p->getAttribType() != GLESpointer::BUFFER) {
++            // Client array data, not a retained offset from a deleted buffer.
+             *pointer = const_cast<GLvoid*>(p->getArrayData());
+         } else {
+             // vertex attrib has buffer, return offset
+--- a/android/android-emugl/host/libs/libOpenglRender/tests/OpenGL_unittest.cpp
++++ b/android/android-emugl/host/libs/libOpenglRender/tests/OpenGL_unittest.cpp
+@@ -13,6 +13,7 @@
+ // limitations under the License.
+ 
+ #include "OpenGLTestContext.h"
++#include "Standalone.h"
+ 
+ #include <gtest/gtest.h>
+ 
+@@ -42,3 +43,98 @@
+ }
+ 
+ }  // namespace emugl
++
++// Regression: a deleted, unused VBO must not be dereferenced as a host pointer.
++namespace emugl {
++class DeletedVertexBufferTest : public GLTest {
++protected:
++    void SetUp() override {
++        setupStandaloneLibrarySearchPaths();
++        const EGLDispatch* egl = LazyLoadedEGLDispatch::get();
++        gl = LazyLoadedGLESv2Dispatch::get();
++        ASSERT_TRUE(egl && gl);
++        m_display = getDisplay();
++        egl->eglSetMaxGLESVersion(2);
++        m_config = createConfig(m_display, 8, 8, 8, 8, 24, 8, 0);
++        m_surface = pbufferSurface(m_display, m_config, 32, 32);
++        m_context = createContext(m_display, m_config, 2, 0);
++        ASSERT_TRUE(egl->eglMakeCurrent(m_display, m_surface, m_surface, m_context));
++    }
++};
++
++TEST_F(DeletedVertexBufferTest, ClientDrawAfterDeletingUnusedBuffer) {
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError()) << "initial context";
++    fprintf(stderr, "GLTEST version=%s\n", gl->glGetString(GL_VERSION));
++    const char* vertex = "attribute vec2 position; void main() { gl_Position=vec4(position,0.,1.); }";
++    const char* fragment = "precision mediump float; void main() { gl_FragColor=vec4(0.,1.,0.,1.); }";
++    GLuint vs = gl->glCreateShader(GL_VERTEX_SHADER);
++    GLuint fs = gl->glCreateShader(GL_FRAGMENT_SHADER);
++    gl->glShaderSource(vs, 1, &vertex, nullptr);
++    gl->glShaderSource(fs, 1, &fragment, nullptr);
++    gl->glCompileShader(vs);
++    gl->glCompileShader(fs);
++    GLint ok = 0;
++    gl->glGetShaderiv(vs, GL_COMPILE_STATUS, &ok);
++    ASSERT_EQ(1, ok);
++    gl->glGetShaderiv(fs, GL_COMPILE_STATUS, &ok);
++    ASSERT_EQ(1, ok);
++    GLuint program = gl->glCreateProgram();
++    gl->glAttachShader(program, vs);
++    gl->glAttachShader(program, fs);
++    gl->glBindAttribLocation(program, 0, "position");
++    gl->glLinkProgram(program);
++    gl->glGetProgramiv(program, GL_LINK_STATUS, &ok);
++    ASSERT_EQ(1, ok);
++    gl->glUseProgram(program);
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError()) << "program";
++
++    GLuint buffer;
++    gl->glGenBuffers(1, &buffer);
++    gl->glBindBuffer(GL_ARRAY_BUFFER, buffer);
++    const GLfloat storage[16] = {};
++    gl->glBufferData(GL_ARRAY_BUFFER, sizeof(storage), storage, GL_STATIC_DRAW);
++    gl->glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 16, reinterpret_cast<void*>(8));
++    gl->glEnableVertexAttribArray(1);
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError()) << "buffer attribute";
++
++    const GLfloat positions[] = {-1,-1, 1,-1, -1,1, 1,1};
++    gl->glBindBuffer(GL_ARRAY_BUFFER, 0);
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError()) << "unbind";
++    gl->glVertexAttribPointerWithDataSize(0, 2, GL_FLOAT, GL_FALSE, 0, positions, sizeof(positions));
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError()) << "client pointer";
++    gl->glEnableVertexAttribArray(0);
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError());
++    gl->glViewport(0, 0, 32, 32);
++    gl->glClearColor(1, 0, 0, 1);
++    gl->glClear(GL_COLOR_BUFFER_BIT);
++    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++    gl->glFinish();
++    ASSERT_EQ(GL_NO_ERROR, gl->glGetError());
++
++    gl->glDeleteBuffers(1, &buffer);
++    GLint binding = -1;
++    gl->glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &binding);
++    EXPECT_EQ(0, binding);
++    GLint enabled = 0;
++    gl->glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &enabled);
++    EXPECT_EQ(1, enabled);
++    GLvoid* retainedOffset = nullptr;
++    gl->glGetVertexAttribPointerv(1, GL_VERTEX_ATTRIB_ARRAY_POINTER, &retainedOffset);
++    EXPECT_EQ(reinterpret_cast<void*>(8), retainedOffset);
++    gl->glClear(GL_COLOR_BUFFER_BIT);
++    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++    gl->glFinish();
++    GLubyte pixel[4] = {};
++    gl->glReadPixels(16, 16, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
++    EXPECT_EQ(GL_NO_ERROR, gl->glGetError());
++    EXPECT_EQ(0, pixel[0]);
++    EXPECT_EQ(255, pixel[1]);
++    EXPECT_EQ(0, pixel[2]);
++    gl->glDisableVertexAttribArray(0);
++    gl->glDisableVertexAttribArray(1);
++    gl->glUseProgram(0);
++    gl->glDeleteProgram(program);
++    gl->glDeleteShader(vs);
++    gl->glDeleteShader(fs);
++}
++}  // namespace emugl

@@ -101,6 +101,11 @@ def main():
                 record["binary"] = str(binary)
                 record["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
                 record["symbols_verified"] = True
+                renderer = build / "lib64/libOpenglRender.so"
+                if not renderer.is_file():
+                    raise RuntimeError("Missing renderer library")
+                record["renderer"] = str(renderer)
+                record["renderer_sha256"] = hashlib.sha256(renderer.read_bytes()).hexdigest()
             record["status"] = "configured" if args.configure_only else "built"
         except BaseException as error:
             record.update(status="failed", error=type(error).__name__ + ": " + str(error))

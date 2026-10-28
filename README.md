@@ -27,7 +27,7 @@ python3 scripts/sync_archives.py --workspace /path/to/local/work
 python3 scripts/build_debug.py --workspace /path/to/local/work --jobs 2 --host-cpus 0,1
 ```
 
-For the reviewed TCG offset fix and an optimized build retaining debug symbols:
+For the reviewed TCG and deleted-vertex-buffer fixes, with debug symbols:
 
 ```sh
 python3 scripts/apply_patches.py --workspace /path/to/local/work --check
@@ -36,9 +36,11 @@ python3 scripts/build_debug.py --workspace /path/to/local/work --build-type RelW
 ```
 
 The patch helper checks every changed source file before writing, rejects mixed
-or unrelated source changes, and shares a lock with the build. Debug and
+or unrelated changes within a patch set, and shares a lock with the build. An
+existing TCG-only checkout can safely receive the later GLES patch without
+reapplying the first patch. Debug and
 RelWithDebInfo use separate output directories. Receipts record patch state and
-binary hashes; raw build trees and app evidence are never committed.
+binary and renderer-library hashes; raw build trees and app evidence are never committed.
 
 Compilation and diagnostic execution are bounded processes. Builds use limited
 parallelism and reduced scheduling priority. No script starts an App, accesses a
@@ -69,6 +71,16 @@ requires preserving the applicable upstream source and license obligations.
 
 ```sh
 python3 -m unittest discover -s tests -v
+```
+
+The focused graphics regression builds a host test and checks deleted-buffer
+bindings, preserved attribute state, and actual output pixels. It accesses no
+Android device or account and terminates its owned process on timeout:
+
+```sh
+python3 scripts/run_graphics_tests.py --workspace /path/to/local/work --host-cpus 0,1
+# Optional cross-check using the explicitly supplied DISPLAY/XAUTHORITY:
+python3 scripts/run_graphics_tests.py --workspace /path/to/local/work --gpu host --host-cpus 0,1
 ```
 
 Read [the current crash investigation](docs/junhong-host-sigill.md) before using

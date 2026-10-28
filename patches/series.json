@@ -108,7 +108,72 @@
     "tcg/tcg.h": {
       "before_sha256": "4977bc43ec2b649f76bb990a968f178a62192aab6938b95ff213d8726b7cd29f",
       "after_sha256": "fc940f881839a68d4e5bffcb7c2b99d48fb73bc0f5e3d20f76f4099f0c91ea63"
+    },
+    "android/android-emugl/host/libs/Translator/include/GLcommon/GLESpointer.h": {
+      "before_sha256": "0a18d492313555be99117c4427cc002d4a1277bb6be0d2afa78f395addd367a8",
+      "after_sha256": "a3d8237ea221dffe7c4fd43bc984095c16bd083e79640aa3be3d0a93e78724ad"
+    },
+    "android/android-emugl/host/libs/Translator/GLcommon/GLESpointer.cpp": {
+      "before_sha256": "248d0c3fe4bd0c81dcc85b15e7447d5d28abd5aa914c1de063192d03e5886835",
+      "after_sha256": "f87ddd035822d9e62951db3e4c386e67245fc3f0843e075d18295abb4bd16d8e"
+    },
+    "android/android-emugl/host/libs/Translator/GLcommon/GLEScontext.cpp": {
+      "before_sha256": "d29ac3e69d3362a3ae46befe5e4abf70ef6261af5906dbb0b90f261cb51381f6",
+      "after_sha256": "cf7e682092d6e8cfe6f828561a853ee64ca11ec5f4315d36f510687cac0dbf2e"
+    },
+    "android/android-emugl/host/libs/Translator/GLES_V2/GLESv2Imp.cpp": {
+      "before_sha256": "c964fb067016ac2c711bdd42dcc51e465e8b8ccf1117b1ecda59b449a4b00f7c",
+      "after_sha256": "b409fbe1b47c7ba41d86cc1c94e8fd4fdf52f082081af1b061d08df6adc61992"
+    },
+    "android/android-emugl/host/libs/libOpenglRender/tests/OpenGL_unittest.cpp": {
+      "before_sha256": "90508fe34317dc0c9947d013c2d8efbac3f4e5fb89a0ba36582d643e4028251b",
+      "after_sha256": "8d0822c68b035217042ae5f58717eae3ceb77e4d521c3642ce642085c46fb9fa"
     }
   },
-  "patch_sha256": "d8adceaa882fe060958544f93d57e76789a56951085e98a4bb0de76b71adc78d"
+  "patches": [
+    {
+      "path": "0001-tcg-bound-translation-blocks.patch",
+      "sha256": "d8adceaa882fe060958544f93d57e76789a56951085e98a4bb0de76b71adc78d",
+      "files": [
+        "accel/tcg/translate-all.c",
+        "accel/tcg/translator.c",
+        "include/exec/exec-all.h",
+        "include/exec/translator.h",
+        "target/alpha/translate.c",
+        "target/arm/translate.c",
+        "target/cris/translate.c",
+        "target/hppa/translate.c",
+        "target/i386/translate.c",
+        "target/lm32/translate.c",
+        "target/m68k/translate.c",
+        "target/microblaze/translate.c",
+        "target/mips/translate.c",
+        "target/moxie/translate.c",
+        "target/nios2/translate.c",
+        "target/openrisc/translate.c",
+        "target/ppc/translate.c",
+        "target/riscv/translate.c",
+        "target/s390x/translate.c",
+        "target/sh4/translate.c",
+        "target/sparc/translate.c",
+        "target/tilegx/translate.c",
+        "target/tricore/translate.c",
+        "target/unicore32/translate.c",
+        "target/xtensa/translate.c",
+        "tcg/tcg.c",
+        "tcg/tcg.h"
+      ]
+    },
+    {
+      "path": "0002-gles-detach-deleted-vertex-buffers.patch",
+      "sha256": "837713ba70e53dd8d5d41a520968839bfd9d07661ed17595ec465d5e68d4dce3",
+      "files": [
+        "android/android-emugl/host/libs/Translator/include/GLcommon/GLESpointer.h",
+        "android/android-emugl/host/libs/Translator/GLcommon/GLESpointer.cpp",
+        "android/android-emugl/host/libs/Translator/GLcommon/GLEScontext.cpp",
+        "android/android-emugl/host/libs/Translator/GLES_V2/GLESv2Imp.cpp",
+        "android/android-emugl/host/libs/libOpenglRender/tests/OpenGL_unittest.cpp"
+      ]
+    }
+  ]
 }

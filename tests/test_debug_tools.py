@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from sync_archives import safe_extract
 from owned_process import run, stop_group
 from build_debug import configuration
-from apply_patches import source_state
+from apply_patches import source_state, reviewed_patches
 from sync_gitiles_tree import git_blob
 
 
@@ -101,6 +101,31 @@ class PatchTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "differs"):
                 source_state(root, manifest)
             self.assertEqual((root / "one.c").read_bytes(), b"unrelated work")
+
+
+    def test_upgrade_preserves_an_applied_patch_and_rejects_tampering(self):
+        digest = lambda data: hashlib.sha256(data).hexdigest()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            patches = root / "patches"
+            source.mkdir()
+            patches.mkdir()
+            manifest = {"files": {}, "patches": []}
+            for number in (1, 2):
+                name = str(number) + ".c"
+                patch = str(number) + ".patch"
+                (source / name).write_bytes(b"new" if number == 1 else b"old")
+                (patches / patch).write_bytes(b"reviewed diff" + bytes([number]))
+                manifest["files"][name] = {"before_sha256": digest(b"old"), "after_sha256": digest(b"new")}
+                manifest["patches"].append({"path": patch, "sha256": digest((patches / patch).read_bytes()), "files": [name]})
+            self.assertEqual([state for _, state in reviewed_patches(source, manifest, patches)],
+                             ["patched", "unpatched"])
+            (patches / "2.patch").write_bytes(b"unreviewed change")
+            with self.assertRaisesRegex(ValueError, "checksum"):
+                reviewed_patches(source, manifest, patches)
+            self.assertEqual((source / "1.c").read_bytes(), b"new")
+            self.assertEqual((source / "2.c").read_bytes(), b"old")
 
 
 class BuildTests(unittest.TestCase):
