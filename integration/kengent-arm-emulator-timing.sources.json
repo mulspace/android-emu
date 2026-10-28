@@ -1,0 +1,34 @@
+{
+  "scope": "incremental candidate against local API24 + snapshot timing integration",
+  "production_deployed": false,
+  "files": {
+    "src/kengent/tools/resource_node/android.py": {
+      "preimage_sha256": "bbf3282f679adce944da91952731a30f7b8644740a823e05856b12af22c32fc9",
+      "postimage_sha256": "604a6e9075da0b0a6229f961c3a08779b212d7e8a8bd6c48ad4a508fc81046f2"
+    },
+    "src/kengent/tools/resource_node/native/ResourceDeviceBridge.java": {
+      "preimage_sha256": "a3ff942504684ed2caba006b3a9502007b65223371c09d9425106758cd813a76",
+      "postimage_sha256": "9ea81ecb48b9feefce82cd715d264289f4c852f03057e8923d813c8cffd66a99"
+    },
+    "app/agents/host/main.py": {
+      "preimage_sha256": "cbed9034046b308fe2e516134cf44df2cdfdba60b221ee0c7c538f674ed10a55",
+      "postimage_sha256": "590df91a8f64be47c1a51626da5d215dac685093c792315f68157015a90d7a9d"
+    },
+    "src/kengent/tools/resource_node/discovery.py": {
+      "preimage_sha256": "a4bdcd46e432ced9729eab8ff58bfe66269bbb7edd7b2ed18bdee87b3cb0c292",
+      "postimage_sha256": "18fd5a536363a516721763816a881d1cd6026d0f0595dd77f3aed510cc64cbbf"
+    },
+    "app/agents/host/config.schema.json": {
+      "preimage_sha256": "db03889ade91418c5fdd92d822e17db10beb8a6e673475eaca1772f2583a901c",
+      "postimage_sha256": "80e346f836b597095f42fe5cd38a93304478470160a51a427d0736220194482c"
+    },
+    "src/kengent/tools/resource_node/android_timing.py": {
+      "preimage_sha256": null,
+      "postimage_sha256": "c46b18086d172c976200cfbd8ae74c1ee30a4c93bf47eb9139609e75a45c4db1"
+    },
+    "tests/platform_services/test_resource_android_timing.py": {
+      "preimage_sha256": null,
+      "postimage_sha256": "47d66bdc7233d78aa4ac01a4a80947f246f4be75b1f9641df44d0d8baab49c58"
+    }
+  }
+}

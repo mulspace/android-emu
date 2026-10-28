@@ -111,3 +111,83 @@ or a suitable production latency policy. No default timeout has been changed.
 Next work: make cold readiness and emulator-specific bounded read timeouts
 explicit, profile redundant observation work without weakening guards, then
 repeat public captures before an authorized managed funds/holdings test.
+
+## Explicit emulator read profile and repeat-capture experiment
+
+The follow-up candidate adds an opt-in `android_timing_profiles` map to the host
+configuration. Only exact `emulator-NNNN[N]` locators accept `arm-emulator`:
+identity reads and snapshot RPCs are bounded at 30 seconds, and initialization
+settles for two seconds. The default profile retains eight-second reads. Tap,
+text, credential and App-launch RPC deadlines remain eight seconds. This profile
+does not extend a ResourceNode lease/request or relax foreground, sensitive-input,
+frame-age, nonce, response or cleanup guards. No live host configuration was changed.
+
+Slow pre-capture work exposed another protocol mismatch: the guest could return
+`capture_delay_ms > 5000`, which the real backend correctly rejects. The candidate
+caps that conservative lower bound at 5000, without discounting post-capture work.
+Full diagnostic durations remain separate, bounded by the observed call and
+30 seconds. Previously successful raw bridge responses alone were therefore not
+sufficient evidence of backend acceptance.
+
+The private candidate JAR SHA-256 is
+`e7454dc063f6997916d95e904c141953ddc1d061557375910ef01e89ef7ae119`
+(DEX 037). One 1500-second isolated dual-CPU run produced:
+
+| Case | Result | Per-snapshot wall seconds |
+| --- | --- | --- |
+| Initial Junhong connection | First root missing; stopped and cleanup acknowledged | Failed |
+| System `uiautomator dump` comparison | Public tree available | Diagnostic only |
+| Junhong home, one session | Three captures passed | 9.651, 8.674, 8.651 |
+| Junhong home, fresh connection | Three captures passed | 10.005, 8.285, 6.579 |
+| TDX public market, broker stopped | Three captures passed | 6.064, 6.066, 4.426 |
+| TDX settled search page | Two captures passed | 3.771, 3.731 |
+| TDX market to search | Tap acknowledged, immediate next snapshot rejected an incomplete sensitive-field tree | Transition not passed |
+
+The eleven successful home/market/search wire receipts were replayed through the actual
+`AndroidBackend.execute` protocol, hierarchy, sensitive-field, image and public
+schema checks, with a retained-byte-only transport and synthetic offline context.
+All eleven passed. This offline validation performs no ADB operation, network call,
+credential access or platform upload; it is not an authenticated end-to-end run.
+Live session startup still took about 25–31 seconds. An additional market read
+before navigation took 18.126 seconds, so the lower steady-state timings are not
+a guaranteed latency bound. The first navigation probe used invalid pixel
+coordinates and was rejected before input; the corrected normalized-coordinate
+probe used a new observation and sent one tap. No uncertain input was replayed.
+
+125 focused Kengent regression tests passed, including exact-locator policy,
+host configuration validation, unchanged physical/credential deadlines, device
+discovery, sessions and snapshot guards. The capture probe also tests refusal of
+physical, ended, mismatched-port/AVD, absent-process and invalid-PID runs.
+
+The incremental patch is
+[`kengent-arm-emulator-timing.patch`](../integration/kengent-arm-emulator-timing.patch).
+It applies on the local API24 + snapshot-diagnostics candidate, **not a clean
+Kengent HEAD by itself**. Its exact pre/post source hashes are recorded in
+[`kengent-arm-emulator-timing.sources.json`](../integration/kengent-arm-emulator-timing.sources.json).
+An apply check against the recorded preimage passed. Unrelated Kengent work is
+excluded. The candidate remains undeployed.
+
+Reproduction helpers:
+
+- `scripts/probe_public_capture.py`: read-only captures on a live, explicitly owned
+  diagnostic GDB/AVD run. It checks the exact port and isolated AVD, saves original
+  wire receipts privately, and requires native cleanup acknowledgement.
+- `scripts/validate_capture_receipts.py`: offline backend replay using the Kengent
+  Python environment. It cannot operate a device or upload an artifact.
+
+These results establish repeatable public-page captures in two warm Junhong
+connections and one TDX connection, not stable cold-start collection or authenticated
+funds/full holdings. Page-transition readiness, cold latency, clone-unique identity,
+and the managed account adapter/current Context remain unresolved. P30, production
+bindings, Scheduler and services remain untouched; Stock must not be switched yet.
+
+A subsequent public-symbol text operation returned IllegalStateException after a
+valid search-page capture. The operation was not replayed; its outcome remains
+unconfirmed pending a focused input-adapter diagnosis. This is another open
+end-to-end navigation requirement, separate from the read-only capture successes.
+
+The test runner received SIGTERM at 1364.22 seconds, before its 1500-second cap.
+Its finally path stopped the owned GDB/emulator group (GDB exit 0); process and
+ports 5576/5577 were verified released. This was an interrupted diagnostic run,
+not proof of an emulator crash or a completed full acceptance test. A later public
+history-navigation attempt was refused by the ended-run guard before device IO.

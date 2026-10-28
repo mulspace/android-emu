@@ -1,0 +1,311 @@
+--- a/src/kengent/tools/resource_node/android.py
++++ b/src/kengent/tools/resource_node/android.py
+@@ -33,6 +33,7 @@
+ from kengent.contracts.resource_schema import validate_operation
+ from kengent.contracts.service_api import ServiceFault
+ from kengent.tools.resource_drivers.node import ANDROID_OPERATIONS
++from .android_timing import AndroidTiming, timing_for
+ 
+ BRIDGE_CLASS = "club.lang.resources.ResourceDeviceBridge"
+ MAX_WIRE = 8 * 1024 * 1024
+@@ -67,7 +68,7 @@
+     if (
+         not isinstance(value, dict)
+         or set(value) != fields
+-        or any(type(item) is not int or not 0 <= item <= 8000 for item in value.values())
++        or any(type(item) is not int or not 0 <= item <= 30000 for item in value.values())
+         or sum(value[key] for key in fields - {"total_ms"}) > value["total_ms"]
+         or value["total_ms"] > call_ms + 1
+     ):
+@@ -553,9 +554,11 @@
+         serial: str,
+         artifacts: tuple[Path, Path],
+         fingerprint: str | None = None,
++        timing_profile: str = "standard",
+     ):
+         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", serial):
+             raise ValueError("Invalid configured Android locator")
++        self.timing = timing_for(serial, timing_profile)
+         self.adb_path, self.serial, self.artifacts, self.fingerprint = (
+             adb_path,
+             serial,
+@@ -575,7 +578,7 @@
+     async def identify(self):
+         raw = await self.shell(
+             "getprop ro.serialno\nsettings get secure android_id\ngetprop ro.product.model\npm list packages",
+-            timeout=8,
++            timeout=self.timing.identity_seconds,
+         )
+         lines = raw.decode("utf-8", "replace").splitlines()
+         if len(lines) < 3:
+@@ -704,6 +707,7 @@
+         self.process = None
+         self.closed = self.ready = self.failed = False
+         self.sequence = 0
++        self.timing = getattr(transport, "timing", AndroidTiming())
+         self.lifecycle, self.rpc = asyncio.Lock(), asyncio.Lock()
+ 
+     @staticmethod
+@@ -816,7 +820,10 @@
+                         "native_request_too_large",
+                         "Native request exceeds the private transport bound",
+                     )
+-                async with asyncio.timeout(8):
++                # A slower read never extends input/credential submission waits
++                # and remains bounded by ResourceNode's lease/request deadline.
++                timeout = self.timing.snapshot_seconds if operation == "android.snapshot" else 8
++                async with asyncio.timeout(timeout):
+                     self.process.stdin.write(raw)
+                     await self.process.stdin.drain()
+                     response = await self._read(
+@@ -870,6 +877,9 @@
+                     "configure",
+                     {"packages": sorted(self.packages), "ttl_ms": self.ttl(session)},
+                 )
++                if self.timing.settle_seconds:
++                    await asyncio.sleep(self.timing.settle_seconds)
++                    self.ttl(session)
+                 self.ready = True
+             except Exception:
+                 self.failed = True
+--- a/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
++++ b/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
+@@ -370,7 +370,9 @@
+                 width = current.w; height = current.h; rotation = current.r;
+             }
+             if (expectedFrame != null) result.put("based_on_frame_ref", expectedFrame);
+-            if (captureDelay[0] >= 0) result.put("capture_delay_ms", captureDelay[0]);
++            // Wire contract is a conservative lower bound, capped at 5 seconds.
++            // A slow pre-capture read must not invalidate otherwise guarded pixels.
++            if (captureDelay[0] >= 0) result.put("capture_delay_ms", Math.min(5000L, captureDelay[0]));
+             // Private diagnostic durations only. The host strips them before
+             // the public response; they never extend a frame/input deadline.
+             if (includeImage) result.put("snapshot_timings", new JSONObject()
+--- a/app/agents/host/main.py
++++ b/app/agents/host/main.py
+@@ -26,6 +26,7 @@
+     PlatformBinaryArtifacts,
+     build_native_artifacts,
+ )
++from kengent.tools.resource_node.android_timing import validate_profiles
+ from kengent.tools.resource_node.discovery import DeviceDiscovery, NodeRegistrar
+ from kengent.tools.resource_node.ownership import NodeProcessLock
+ from kengent.web.resource_node import create_resource_node_app
+@@ -97,6 +98,7 @@
+         ):
+             raise ValueError("Credential input package is outside the host allowlist")
+     PlatformBinaryArtifacts(settings["platform_url"])
++    validate_profiles(settings.get("android_timing_profiles", {}))
+     return settings
+ 
+ 
+@@ -136,6 +138,7 @@
+         artifact_sink=sink,
+         registrar=registrar,
+         credential_input=settings.get("credential_input", {}),
++        timing_profiles=settings.get("android_timing_profiles", {}),
+     )
+ 
+     @asynccontextmanager
+--- a/src/kengent/tools/resource_node/discovery.py
++++ b/src/kengent/tools/resource_node/discovery.py
+@@ -19,6 +19,7 @@
+     AndroidBackend,
+     run_bounded,
+ )
++from .android_timing import validate_profiles
+ 
+ 
+ class NodeRegistrar:
+@@ -131,6 +132,7 @@
+         command_runner=run_bounded,
+         transport_factory=AdbTransport,
+         credential_input=None,
++        timing_profiles=None,
+     ):
+         self.node, self.inventory, self.node_id, self.adb_path = (
+             node,
+@@ -148,6 +150,7 @@
+             command_runner,
+             transport_factory,
+         )
++        self.timing_profiles = validate_profiles({} if timing_profiles is None else timing_profiles)
+         self.credential_input = {} if credential_input is None else credential_input
+         if (
+             not isinstance(self.credential_input, dict)
+@@ -160,11 +163,13 @@
+             self._bind(known)
+ 
+     def _transport(self, serial, fingerprint=None):
++        options = {"timing_profile": self.timing_profiles[serial]} if serial in self.timing_profiles else {}
+         return self.transport_factory(
+             adb_path=self.adb_path,
+             serial=serial,
+             artifacts=self.artifacts,
+             fingerprint=fingerprint,
++            **options,
+         )
+ 
+     def _bind(self, device):
+--- a/app/agents/host/config.schema.json
++++ b/app/agents/host/config.schema.json
+@@ -15,6 +15,9 @@
+     "registration_context_file": {"type": "string", "minLength": 1},
+     "listen_host": {"type": "string", "minLength": 1, "default": "127.0.0.1"},
+     "listen_port": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 7794},
++    "android_timing_profiles": {"type": "object", "maxProperties": 100,
++      "propertyNames": {"type": "string", "pattern": "^emulator-[0-9]{4,5}$"},
++      "additionalProperties": {"enum": ["standard", "arm-emulator"]}},
+     "credential_input": {"type": "object", "maxProperties": 100,
+       "propertyNames": {"type": "string", "minLength": 1, "maxLength": 200},
+       "additionalProperties": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/credential_policy"}}},
+--- /dev/null
++++ b/src/kengent/tools/resource_node/android_timing.py
+@@ -0,0 +1,31 @@
++"""Explicit host-owned read timing; physical input deadlines are unchanged."""
++
++from dataclasses import dataclass
++import re
++
++
++@dataclass(frozen=True)
++class AndroidTiming:
++    identity_seconds: int = 8
++    snapshot_seconds: int = 8
++    settle_seconds: int = 0
++
++
++def timing_for(serial: str, profile: str = "standard") -> AndroidTiming:
++    if profile == "standard":
++        return AndroidTiming()
++    if profile != "arm-emulator" or not re.fullmatch(r"emulator-[0-9]{4,5}", serial):
++        raise ValueError("Extended Android read timing requires an explicit emulator locator")
++    return AndroidTiming(identity_seconds=30, snapshot_seconds=30, settle_seconds=2)
++
++
++def validate_profiles(profiles: object) -> dict[str, str]:
++    if not isinstance(profiles, dict) or len(profiles) > 100:
++        raise ValueError("Invalid Android timing profiles")
++    for serial, profile in profiles.items():
++        if not isinstance(serial, str) or not isinstance(profile, str):
++            raise ValueError("Invalid Android timing profile")
++        if not re.fullmatch(r"emulator-[0-9]{4,5}", serial):
++            raise ValueError("Android timing profiles require an explicit emulator locator")
++        timing_for(serial, profile)
++    return dict(profiles)
+--- /dev/null
++++ b/tests/platform_services/test_resource_android_timing.py
+@@ -0,0 +1,113 @@
++import asyncio
++import json
++from contextlib import asynccontextmanager
++from types import SimpleNamespace
++
++import pytest
++
++from kengent.tools.resource_node import android
++from kengent.tools.resource_node.android_timing import timing_for, validate_profiles
++from kengent.tools.resource_node.discovery import DeviceDiscovery
++
++
++@pytest.mark.parametrize("serial,profile", [
++    ("physical-usb", "arm-emulator"), ("127.0.0.1:5555", "arm-emulator"),
++    ("emulator-5576", "unbounded"), ("emulator-5576/../device", "arm-emulator"),
++])
++def test_extended_read_timing_cannot_be_enabled_for_a_phone(serial, profile):
++    with pytest.raises(ValueError):
++        timing_for(serial, profile)
++
++
++def test_default_device_timing_and_explicit_profile():
++    assert timing_for("physical-usb").identity_seconds == 8
++    assert timing_for("emulator-5576").snapshot_seconds == 8
++    profile = timing_for("emulator-5576", "arm-emulator")
++    assert (profile.identity_seconds, profile.snapshot_seconds, profile.settle_seconds) == (30, 30, 2)
++    with pytest.raises(ValueError):
++        validate_profiles({"emulator-5576": 30})
++
++
++def test_profile_is_forwarded_only_to_explicit_locator():
++    discovery = DeviceDiscovery(
++        node=SimpleNamespace(backends={}), inventory=SimpleNamespace(all=lambda: []),
++        node_id="fixture", adb_path="fixture-adb", artifacts=(), packages=["example.app"],
++        artifact_sink=None, registrar=None, transport_factory=lambda **kwargs: kwargs,
++        timing_profiles={"emulator-5576": "arm-emulator"},
++    )
++    assert discovery._transport("emulator-5576")["timing_profile"] == "arm-emulator"
++    assert "timing_profile" not in discovery._transport("emulator-5578")
++    assert "timing_profile" not in discovery._transport("physical-usb")
++
++
++@pytest.mark.asyncio
++async def test_emulator_profile_changes_only_snapshot_rpc_deadline(monkeypatch):
++    deadlines = []
++    @asynccontextmanager
++    async def deadline(seconds):
++        deadlines.append(seconds)
++        yield
++    monkeypatch.setattr(android.asyncio, "timeout", deadline)
++    class Input:
++        def write(self, value):
++            pass
++        async def drain(self):
++            pass
++    transport = SimpleNamespace(timing=timing_for("emulator-5576", "arm-emulator"))
++    session = android.NativeSession(transport, {"nonce": "0" * 32}, ["example.app"])
++    session.process = SimpleNamespace(returncode=None, stdin=Input())
++    async def response(*, expected_id=None, private_input=False):
++        return {"id": expected_id, "ok": True, "result": {}}
++    monkeypatch.setattr(session, "_read", response)
++    for operation in ("android.snapshot", "android.tap", "android.start_app", "android.credential_text"):
++        await session.call(operation, {"arguments": {}})
++    assert deadlines == [30, 8, 8, 8]
++
++
++@pytest.mark.asyncio
++async def test_identity_uses_explicit_profile_without_changing_fingerprint(monkeypatch):
++    results, waits = [], []
++    for profile in ("standard", "arm-emulator"):
++        transport = android.AdbTransport(adb_path="fixture", serial="emulator-5576", artifacts=(), timing_profile=profile)
++        async def shell(script, *, timeout):
++            waits.append(timeout)
++            return b"known-fixture-serial\n0123456789abcdef\nfixture-model\npackage:example.app\n"
++        monkeypatch.setattr(transport, "shell", shell)
++        results.append(await transport.identify())
++    assert waits == [8, 30] and results[0] == results[1]
++
++
++def test_long_snapshot_diagnostic_must_fit_observed_call():
++    timings = dict(guard_before_ms=6630, capture_ms=122, guard_after_ms=3511, encoding_ms=266, total_ms=10604)
++    assert android._snapshot_timings(timings, 10830) == timings
++    assert android._snapshot_timings(timings, 8000) is None
++    assert android._snapshot_timings({**timings, "total_ms": 30001}, 40000) is None
++
++
++@pytest.mark.parametrize("profiles", [
++    {"physical-usb": "standard"}, {"physical-usb": "arm-emulator"},
++    {"emulator-5576": "infinite"}, {"emulator-5576\n": "standard"},
++    {"emulator-5576": 30}, [],
++])
++def test_invalid_profile_map_is_rejected_before_discovery(profiles):
++    with pytest.raises(ValueError):
++        validate_profiles(profiles)
++
++
++@pytest.mark.parametrize("profile,valid", [("arm-emulator", True), ("standard", True), ("infinite", False)])
++def test_host_settings_accept_only_declared_bounded_profiles(tmp_path, profile, valid):
++    from app.agents.host.main import load_settings
++    settings = {
++        "node_id": "offline-fixture", "state_root": "state", "cache_root": "cache",
++        "sdk_root": "sdk", "adb_path": "fixture", "platform_url": "http://127.0.0.1:1",
++        "public_url": "http://127.0.0.1:2", "registration_context_file": "context.json",
++        "allowed_packages": ["example.public"],
++        "android_timing_profiles": {"emulator-5576": profile},
++    }
++    path = tmp_path / "host.json"
++    path.write_text(json.dumps(settings))
++    if valid:
++        assert load_settings(path)["android_timing_profiles"] == settings["android_timing_profiles"]
++    else:
++        with pytest.raises(ValueError):
++            load_settings(path)
