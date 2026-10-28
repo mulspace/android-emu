@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from sync_sources import validate_project
+from source_contract import validate_project
 
 
 class SourceContractTests(unittest.TestCase):

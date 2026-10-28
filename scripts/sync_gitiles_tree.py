@@ -15,7 +15,7 @@ import tempfile
 import urllib.parse
 
 from owned_process import run
-from sync_sources import ROOT, validate_project
+from source_contract import ROOT, validate_project
 from sync_archives import sync_one
 
 
@@ -50,7 +50,7 @@ def sync_tree(project, subtree, workspace, resolve_ip, direct_files=False):
         tree = json.loads(treefile.read_text()[4:])
         entries = tree["entries"]
         dest.mkdir(parents=True, exist_ok=True)
-        for entry in entries:
+        for entry in sorted(entries, key=lambda e: (e["type"] == "tree", not e["name"].startswith(("libc++", "clang", "ld.")), e["name"])):
             name = entry["name"]
             if Path(name).name != name or name in (".", ".."): raise ValueError("Invalid tree entry")
             child = "/".join(filter(None, (subtree.strip("/"), name)))

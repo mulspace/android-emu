@@ -3,8 +3,11 @@
 ## Status
 
 Reproduced twice under GDB in a new, isolated ARM32 AVD on the same Linux x86-64
-host. No root-cause patch is verified yet. The debug source build has not completed:
-large official dependency downloads repeatedly end in TLS connection errors.
+host. No root-cause patch is verified yet. The pinned Clang 12.0.5 C/C++ compile-and-link checks and CMake configuration
+now pass. The first Debug build completed all 5755 steps in 761.53 seconds;
+its ARM32 headless ELF has .debug_info and .debug_line sections. Large official downloads were
+completed through directory/file fallbacks and a per-request verified Google IP,
+without changing global DNS/proxy settings.
 The scripts in this repository are build/diagnostic tooling, not a finished emulator
 fix. Stock jobs have **not** been switched.
 
@@ -49,8 +52,9 @@ No instruction was skipped, signal ignored, APK patched, or broker check bypasse
 
 ## Next decisive checks
 
-1. Finish the pinned Linux toolchain/dependency download; build Debug with ARM32
-   retained, no ASAN/coverage for the baseline, no symbol stripping/upload.
+1. Completed: pinned Debug build with ARM32 retained, no ASAN/coverage for the
+   baseline, no symbol stripping/upload. Binary SHA-256:
+   `dfc9ec4554dc3d3616d91932390803bc8031014d9438ea876d2789e373f29403`.
 2. Verify DWARF sections and source/compiler provenance, then repeat the same
    broker-page path with the new engine and the same isolated guest.
 3. If reproduced, inspect the TCG block, its MMU slow path and inline continuation,
@@ -72,3 +76,22 @@ with status zero after printing a signal is not application success.
 - [Pinned Android Emulator source](https://android.googlesource.com/platform/external/qemu/+/e106d9eeab3c96db145bc5b59188283acdba3df8/)
 - [Official build manifest](https://android.googlesource.com/platform/manifest/+/emu-30-release/default.xml)
 - [QEMU translator internals](https://www.qemu.org/docs/master/devel/tcg.html)
+
+## Additional hypothesis under investigation
+
+The pinned baseline stores generated instruction-end and reset-jump offsets in
+16-bit fields but does not reject a generated block exceeding 65535 bytes. The
+captured slow-path branch lies about 90 KiB beyond the fault. This makes offset
+truncation a concrete candidate, not a proven explanation for this crash. The
+diagnostic script now reads code at fault PC + 65536 and, when symbols exist,
+prints the last TCG generation offsets without executing inferior functions.
+
+Upstream discussed a related offset overflow in
+[QEMU bug 1824853](https://www.mail-archive.com/qemu-devel%40nongnu.org/msg611070.html).
+A matching upstream report alone is not sufficient to declare this case fixed.
+
+The initial sequential and interleaved NEON-store candidate programs both passed
+on SDK 30.5.3. They do **not** yet reproduce the broker crash and cannot be used
+as proof that the proposed overflow fix addresses it. The full broker path
+remains the required reproduction. The guest regression is a native executable,
+not an APK; it does not access Android accounts or any network service.

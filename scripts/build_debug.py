@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def configuration(source, build, cmake, ninja):
-    return [str(cmake), "-S", str(source), "-B", str(build), "-G", "Ninja",
+    return [str(cmake), "-H" + str(source), "-B" + str(build), "-G", "Ninja",
         "-DCMAKE_MAKE_PROGRAM=" + str(ninja),
         "-DCMAKE_TOOLCHAIN_FILE=" + str(source / "android/build/cmake/toolchain-linux-x86_64.cmake"),
         "-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
@@ -65,8 +65,8 @@ def main():
     prefix = ["taskset", "-c", ",".join(map(str, sorted(cpus))), "nice", "-n", "10"]
     cmds = [configuration(source, build, cmake, ninja)]
     if not args.configure_only:
-        cmds.append([str(cmake), "--build", str(build), "--parallel", str(args.jobs),
-                     "--target", "emulator", "qemu-system-armel-headless"])
+        cmds.append([str(ninja), "-C", str(build), "-j", str(args.jobs),
+                     "emulator", "qemu-system-armel-headless"])
     def interrupted(signum, frame): raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupted)
     stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")

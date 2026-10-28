@@ -21,6 +21,22 @@ x/32i $pc-64
 x/32bx $pc
 x/16i $pc
 info symbol $pc
+python
+import gdb
+# Read-only probes: never call inferior functions or alter the faulting PC.
+for command in (
+    "x/48bx $pc+65520", "x/12i $pc+65536",
+    "p tcg_ctx->code_ptr - tcg_ctx->code_buf",
+    "p tcg_ctx->code_buf", "p tcg_ctx->code_ptr",
+    "p tcg_ctx->tb_jmp_reset_offset[0]", "p tcg_ctx->tb_jmp_reset_offset[1]",
+    "p tcg_ctx->tb_jmp_insn_offset[0]", "p tcg_ctx->tb_jmp_insn_offset[1]",
+):
+    try:
+        gdb.write("\n=== OPTIONAL TCG PROBE: " + command + " ===\n")
+        gdb.execute(command)
+    except gdb.error as error:
+        gdb.write("Probe unavailable: " + str(error) + "\n")
+end
 echo \n=== MEMORY MAPPINGS ===\n
 info proc mappings
 info sharedlibrary

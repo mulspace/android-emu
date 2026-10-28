@@ -88,6 +88,9 @@ class BuildTests(unittest.TestCase):
 
     def test_arm32_symbols_and_no_upload_are_explicit(self):
         args = configuration(Path('/source'), Path('/build'), Path('/cmake'), Path('/ninja'))
+        self.assertIn("-H/source", args)
+        self.assertIn("-B/build", args)
+        self.assertNotIn("-S", args)
         for flag in ("-DCMAKE_BUILD_TYPE=Debug", "-DOPTION_MINBUILD=OFF", "-DOPTION_CRASHUPLOAD=NONE", "-DOPTION_ASAN_IN_DEBUG=OFF", "-DWEBRTC=OFF"):
             self.assertIn(flag, args)
 

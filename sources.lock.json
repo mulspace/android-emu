@@ -141,7 +141,8 @@
         "x264/linux-x86_64",
         "swiftshader/linux-x86_64",
         "qtwebengine-deps/linux-x86_64",
-        "virtualscene"
+        "virtualscene",
+        "automation"
       ]
     },
     {
@@ -154,7 +155,10 @@
       "path": "prebuilts/android-emulator-build/qt",
       "url": "https://android.googlesource.com/platform/prebuilts/android-emulator-build/qt",
       "revision": "9382421d86bc6db78d3785d2c34758330787165c",
-      "subtree": "linux-x86_64-nowebengine"
+      "subtrees": [
+        "common",
+        "linux-x86_64-nowebengine"
+      ]
     },
     {
       "path": "prebuilts/clang/host/linux-x86",
@@ -206,6 +210,23 @@
       "path": "external/m4",
       "url": "https://android.googlesource.com/toolchain/m4",
       "revision": "e0fa9d57f818d550ccef84d1520923f2a942f5ba"
+    },
+    {
+      "path": "prebuilts/android-emulator-build/mesa",
+      "url": "https://android.googlesource.com/platform/prebuilts/android-emulator-build/mesa",
+      "revision": "be7c00f399b415511d73308f0af0c0310512aced",
+      "subtree": "linux-x86_64"
+    },
+    {
+      "path": "prebuilts/android-emulator-build/mesa-deps",
+      "url": "https://android.googlesource.com/platform/prebuilts/android-emulator-build/mesa-deps",
+      "revision": "17837fdb1889014fa01cbbbda56afc9b6034815f",
+      "subtree": "linux-x86_64"
+    },
+    {
+      "path": "device/google/cuttlefish",
+      "url": "https://android.googlesource.com/device/google/cuttlefish",
+      "revision": "1ba85dd879dd521f05c80fb2627f836396eb2a4d"
     }
   ]
 }

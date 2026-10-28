@@ -19,7 +19,7 @@ import time
 import fcntl
 
 from owned_process import run
-from sync_sources import ROOT, validate_project
+from source_contract import ROOT, validate_project
 
 
 def safe_extract(archive, destination, *, final_destination=None, allowed_root=None):

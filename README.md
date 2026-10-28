@@ -63,8 +63,15 @@ this repository. The source build and app acceptance are unfinished; a successfu
 tooling test does not imply an emulator fix. Archive receipts record the official
 commit URL and local SHA-256, not an independently signed artifact. Existing
 source directories are preserved and must not be silently replaced on resync.
-`sync_sources.py` is the optional full Git checkout method; use a separate workspace
-when switching between Git checkout and archive extraction.
+For a large archive that repeatedly fails, use the verified-file fallback:
+
+```sh
+python3 scripts/sync_gitiles_tree.py --workspace /path/to/local/work \
+  --project prebuilts/clang/host/linux-x86 --subtree clang-r416183b --files
+```
+
+It resumes verified files, checks each direct blob against the official Git object
+ID, and reports incomplete paths without marking the project successful.
 
 For a broken fake-IP DNS/proxy route, `sync_archives.py --resolve-ip <verified-public-IP>`
 changes only curl's destination for the original HTTPS hostname. Obtain the current
