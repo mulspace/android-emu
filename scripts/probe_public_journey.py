@@ -148,7 +148,8 @@ async def probe(args):
     receipt = {"public_only": True, "production_cutover": False, "account_input": False,
                "account_collection_verified": False, "package": args.package,
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
-               "checked_capture": True, "events": events, "visual_review_required": True}
+               "checked_capture": True, "events": events, "visual_review_required": True,
+               "launch_mode": "prestarted" if args.prestarted else "native"}
     session, passed, phase = None, False, "identify"
     started = time.monotonic()
     deadline = datetime.now(UTC) + timedelta(seconds=600)
@@ -196,7 +197,8 @@ async def probe(args):
                     data, _ = _snapshot_image(result.pop("image_base64"), result, "jpeg")
                     (args.output / f"{name}.jpg").write_bytes(data)
                 return raw
-            await call("launch_app_once", "android.start_app", {"package": args.package})
+            if not args.prestarted:
+                await call("launch_app_once", "android.start_app", {"package": args.package})
             await Journey(args.package, capture, call).navigate()
             passed = True
     except BaseException as error:
@@ -223,6 +225,7 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--serial", choices=("emulator-5576",), default="emulator-5576")
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
+    parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")
     args = parser.parse_args()

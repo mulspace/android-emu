@@ -117,6 +117,8 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seconds", type=int, default=1200)
     parser.add_argument("--gpu", choices=("host", "swiftshader_indirect"), default="host")
+    parser.add_argument("--debugger", choices=("gdb", "none"), default="gdb",
+                        help="Compare the same symbol-bearing binary without a host ptrace debugger")
     parser.add_argument("--host-cpus", default="14,15")
     parser.add_argument("--experimental-arm-smp", action="store_true",
                         help="Test ARMv7 SMP/MTTCG on a separate cloned AVD")
@@ -167,29 +169,32 @@ def main():
                             disable_jni_checks=args.disable_jni_checks, arm_vcpus=args.arm_vcpus)
     prefix = ["taskset", "-c", ",".join(map(str, sorted(cpus))), "nice", "-n", "10"]
     gdb = ["gdb", "-nx", "-q", "--batch", "-x", str(Path(__file__).with_name("crash.gdb")), "--args"]
+    launcher = gdb if args.debugger == "gdb" else []
     started = time.monotonic()
     def on_signal(signum, frame):
         raise InterruptedError("Diagnostic interrupted")
     signal.signal(signal.SIGTERM, on_signal)
     receipt = {"command": command, "started_at": datetime.datetime.now().astimezone().isoformat(),
         "serial": "emulator-" + str(args.port), "duration_limit_seconds": args.seconds,
+        "debugger": args.debugger,
         "experimental_arm_smp": args.experimental_arm_smp,
         "guest_vcpus": args.arm_vcpus if args.experimental_arm_smp else 1,
         "jni_runtime_checks_requested": not args.disable_jni_checks,
         "production_cutover": False, "physical_device_operated": False, "account_login_attempted": False}
-    with (args.output / "gdb.log").open("wb") as log:
-        process = subprocess.Popen(prefix + gdb + command, env=env, stdout=log,
+    with (args.output / ("gdb.log" if args.debugger == "gdb" else "emulator.log")).open("wb") as log:
+        process = subprocess.Popen(prefix + launcher + command, env=env, stdout=log,
             stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
         receipt["owned_pgid"] = process.pid
-        (args.output / "started.json").write_text(json.dumps(receipt, indent=2) + "\n")
-        print(json.dumps({"started": process.pid, "serial": receipt["serial"]}), flush=True)
         try:
+            receipt["owned_start_ticks"] = Path(f"/proc/{process.pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+            (args.output / "started.json").write_text(json.dumps(receipt, indent=2) + "\n")
+            print(json.dumps({"started": process.pid, "serial": receipt["serial"]}), flush=True)
             while process.poll() is None and time.monotonic() - started < args.seconds:
                 if (args.output / "stop.request").exists():
                     break
                 time.sleep(1)
         finally:
-            # Reap the owned group even if GDB has already exited with an inferior left.
+            # Reap only this owned group, including startup/receipt failures.
             stop_group(process)
             receipt.update(exit_code=process.returncode, elapsed_seconds=round(time.monotonic() - started, 2),
                 ended_at=datetime.datetime.now().astimezone().isoformat())

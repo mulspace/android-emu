@@ -10,6 +10,23 @@ from validate_capture_receipts import retained_options
 
 
 class OwnedCaptureTests(unittest.TestCase):
+    def test_direct_mode_requires_exact_engine_and_original_process_identity(self):
+        for mode in ('valid', 'wrong_binary', 'reused_pid', 'missing_identity', 'wrong_group', 'unknown_mode'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); run = root/'run'; proc = root/'proc'; run.mkdir(); (proc/'100').mkdir(parents=True)
+                receipt = {'serial':'emulator-5576','owned_pgid':100,'owned_start_ticks':'500',
+                           'debugger':'unknown' if mode=='unknown_mode' else 'none',
+                           'command':['/candidate/emulator','-avd','android-emu-debug-fixture','-port','5576']}
+                if mode=='missing_identity': receipt.pop('owned_start_ticks')
+                (run/'started.json').write_text(json.dumps(receipt))
+                binary=b'/candidate/qemu/linux-x86_64/qemu-system-armel-headless' if mode!='wrong_binary' else b'/usr/bin/python3'
+                (proc/'100/cmdline').write_bytes(b'\0'.join([binary,b'-avd',b'android-emu-debug-fixture',b'-port',b'5576']))
+                stat=['S','1','101' if mode=='wrong_group' else '100']+['0']*16+['501' if mode=='reused_pid' else '500']
+                (proc/'100/stat').write_text('100 (emulator) '+' '.join(stat))
+                if mode=='valid': owned_run(run,'emulator-5576',proc)
+                else:
+                    with self.assertRaises(ValueError): owned_run(run,'emulator-5576',proc)
+
     def test_only_live_owned_emulator_process_is_accepted(self):
         for mode in ('valid', 'physical', 'wrong_serial', 'finished', 'wrong_port', 'wrong_avd', 'missing_process', 'invalid_pid'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:

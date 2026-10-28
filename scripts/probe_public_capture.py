@@ -22,8 +22,27 @@ def owned_run(path, serial, proc_root=Path('/proc')):
     if type(pid) is not int or pid < 1:
         raise ValueError("Invalid diagnostic process")
     command = (proc_root / str(pid) / 'cmdline').read_bytes().split(b"\0")
-    if b"--args" not in command or b"-port" not in command:
-        raise ValueError("Owned diagnostic process is not the expected GDB run")
+    mode = receipt.get("debugger", "gdb")
+    if mode == "gdb":
+        if b"--args" not in command or Path(os.fsdecode(command[0])).name != "gdb":
+            raise ValueError("Owned diagnostic process is not the expected GDB run")
+    elif mode == "none":
+        original = receipt.get("command")
+        if not isinstance(original, list) or not original or not isinstance(original[0], str):
+            raise ValueError("Missing original emulator command")
+        expected = Path(original[0]).parent / "qemu/linux-x86_64/qemu-system-armel-headless"
+        if not expected.is_absolute() or command[0] != os.fsencode(expected):
+            raise ValueError("Owned direct process is not the expected emulator engine")
+        if not receipt.get("owned_start_ticks"):
+            raise ValueError("Direct run requires original process identity")
+    else:
+        raise ValueError("Unsupported diagnostic debugger mode")
+    if "owned_start_ticks" in receipt:
+        stat = (proc_root / str(pid) / "stat").read_text().rsplit(") ", 1)[1].split()
+        if stat[19] != receipt["owned_start_ticks"] or int(stat[2]) != pid:
+            raise ValueError("Owned diagnostic process identity changed")
+    if b"-port" not in command:
+        raise ValueError("Owned diagnostic port missing")
     if command[command.index(b"-port") + 1] != serial.removeprefix("emulator-").encode():
         raise ValueError("Owned diagnostic port changed")
     if b"-avd" not in command or not command[command.index(b"-avd") + 1].startswith(b"android-emu-debug-"):

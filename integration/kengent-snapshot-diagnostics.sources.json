@@ -1,0 +1,22 @@
+{
+  "src/kengent/tools/resource_node/native/SnapshotCapture.java": {
+    "before_sha256": "00b5184fb8211ca543193eeb861ac9cc2f98c3bed205e77358afbed68175bacc",
+    "after_sha256": "14815e6246aad23b9f79f528c72f4e1f30e2b5c2c883e173509cb2ddf796a6ab"
+  },
+  "src/kengent/tools/resource_node/native/ResourceDeviceBridge.java": {
+    "before_sha256": "39bdad31a234691bba741ef72426b25ebca5d91b88a0b657a34c342b904c211e",
+    "after_sha256": "2fc40d4b64c01dce1721b7f098e231add1441df902146d0c24eb9438526f7338"
+  },
+  "src/kengent/tools/resource_node/android.py": {
+    "before_sha256": "6142f46b613162eda3f26d6b6d31a10457f7705ac46a0689d085ffca0cb7de79",
+    "after_sha256": "61790db151d4a0bb81e6fd238b037a535fd4f9ed3400f9fbd8d87d925aa7a98c"
+  },
+  "tests/platform_services/test_resource_android.py": {
+    "before_sha256": "b361783422653a97e046109acbc0c1d9045a4db12e4027c257a1de1c6d94f9c8",
+    "after_sha256": "4138023d211d19cd675913e562119cc4f7652cc3cac200151dab18d250e6e65f"
+  },
+  "tests/platform_services/test_resource_snapshot_difference.py": {
+    "before_sha256": null,
+    "after_sha256": "a908b3c5b662951c6fa1a0439d128d6434759fed8088cf628c4158378fc2ebfc"
+  }
+}

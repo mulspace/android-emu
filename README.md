@@ -151,3 +151,8 @@ launch, deterministic navigation and three strictly bound screenshots together.
 The current cold/warm end-to-end gate still fails; earlier successful settled
 screenshots do not establish production Stock readiness. Account collection
 requires the managed Stock App and trusted account Context.
+
+See [snapshot diagnostics and the single-pass experiment](docs/snapshot-observation-diagnostics.md)
+for reproducible no-GDB comparisons, numeric observation timing and the
+experimental complete single traversal. These are isolated tests, not a
+production capture or account authorization change.
