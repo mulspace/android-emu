@@ -294,3 +294,37 @@ search screen the first tap only closed the keyboard, so the destination was
 checked before the next tap. GDB, emulator PID and both dedicated ports were
 verified released. Fourteen tooling tests and a fresh exact-hash application of
 the PSCI patch passed.
+
+## Optional JNI-diagnostic comparison
+
+A second independent copy of the same offline baseline used the same engine,
+host GPU, two guest CPUs and two host CPU affinity, adding only upstream
+`-no-jni`. Guest startup logs explicitly reported `CheckJNI is OFF`. Junhong's
+main-screen launch record was 56.286 seconds versus 66.356 in the preceding
+sample; Tongdaxin's Activity record was 20.217 versus 25.956 seconds. These are
+one cold start per configuration, with network/cache/scheduling variability,
+not a validated speedup or a reason to change defaults. Complete content can
+appear later than the Activity launch record.
+
+Both configurations still had a System UI boot-time ANR. With JNI diagnostics
+off, the ordinary-account page and holdings login choices rendered again.
+One 900-entry event-log read exceeded 25 seconds while Tongdaxin started;
+a subsequent 250-entry read and screen capture succeeded. The host emulator
+was alive, without swap or a crash breakpoint. The public market dashboard
+rendered normally. Extra JNI diagnostics remain enabled by default.
+
+The JNI comparison finished after 932 seconds. The 600999 daily candles, volume
+and MACD were captured again with the chart ending 2026-10-28 (the run crossed
+local midnight). The guest crash buffer was empty and retained events showed
+the same System UI startup ANR, with no App ANR recorded. The known host crashes
+did not recur. GDB/inferior PIDs and ports 5576/5577 were verified absent/released.
+No new default was selected: two samples and these remaining startup/latency
+issues do not prove stable unattended collection.
+
+Full acceptance still requires an approved managed account session on this test
+device and complete funds/holdings evidence. The terminal lacks tenant-app
+`application_call` and a current request Context; raw credentials, operator
+identity or a new guessed binding are not substitutes. The logged-out broker
+also displayed a maintenance notice warning about asset-data accuracy until
+01:00 on 2026-10-29. No authentication input, order, Scheduler mutation, P30 action
+or production binding change was made.
