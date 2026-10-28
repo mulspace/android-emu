@@ -3,6 +3,7 @@ import hashlib
 import os
 from pathlib import Path
 import signal
+import struct
 import subprocess
 import sys
 import tarfile
@@ -16,6 +17,7 @@ from owned_process import run, stop_group
 from build_debug import configuration
 from apply_patches import source_state, reviewed_patches
 from sync_gitiles_tree import git_blob
+from run_debug import isolated_avd_paths, guest_command, check_local_overlay
 
 
 class ArchiveTests(unittest.TestCase):
@@ -147,5 +149,95 @@ class BuildTests(unittest.TestCase):
         for flag in ("-DCMAKE_BUILD_TYPE=Debug", "-DOPTION_MINBUILD=OFF", "-DOPTION_CRASHUPLOAD=NONE", "-DOPTION_ASAN_IN_DEBUG=OFF", "-DWEBRTC=OFF"):
             self.assertIn(flag, args)
 
+
+
+
+class IsolatedGuestTests(unittest.TestCase):
+    def test_qcow_backing_cannot_escape_the_cloned_avd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            disk = Path(tmp) / 'userdata-qemu.img'
+            disk.write_bytes(b'base')
+            overlay = disk.with_name(disk.name + '.qcow2')
+            def write_header(backing, features=0):
+                header = bytearray(104)
+                struct.pack_into('>IIQI', header, 0, 0x514649fb, 3, 104, len(backing))
+                struct.pack_into('>Q', header, 72, features)
+                overlay.write_bytes(header + backing)
+            write_header(disk.name.encode())
+            check_local_overlay(disk)
+            for backing in (b'../another-guest.img', b'/outside/userdata-qemu.img', b'file:/outside'):
+                write_header(backing)
+                with self.assertRaisesRegex(ValueError, 'own local base'):
+                    check_local_overlay(disk)
+            write_header(disk.name.encode(), features=4)
+            with self.assertRaisesRegex(ValueError, 'features'):
+                check_local_overlay(disk)
+            self.assertEqual(disk.read_bytes(), b'base')
+
+    def test_existing_layers_require_matching_image_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            name = 'android-emu-debug-test'
+            avd = home / (name + '.avd')
+            avd.mkdir()
+            (home / (name + '.ini')).write_text('path=' + str(avd) + '\n')
+            for disk in ['userdata-qemu.img', 'cache.img']:
+                (avd / disk).write_bytes(b'base')
+            backing = b'userdata-qemu.img'
+            header = bytearray(104)
+            struct.pack_into('>IIQI', header, 0, 0x514649fb, 3, 104, len(backing))
+            overlay = avd / 'userdata-qemu.img.qcow2'
+            overlay.write_bytes(header + backing)
+            original = overlay.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'image-version marker'):
+                isolated_avd_paths(home, name)
+            image = home / 'system'
+            image.mkdir()
+            (image / 'build.prop').write_text('ro.build.version.incremental=123\n')
+            (avd / 'config.ini').write_text('image.sysdir.1=' + str(image) + '\n')
+            (avd / 'version_num.cache').write_text('122\n')
+            with self.assertRaisesRegex(ValueError, 'Image-version mismatch'):
+                isolated_avd_paths(home, name)
+            (avd / 'version_num.cache').write_text('123\n')
+            self.assertEqual(len(isolated_avd_paths(home, name)), 2)
+            self.assertEqual(overlay.read_bytes(), original)
+
+    def test_rejects_registration_and_disk_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            name = "android-emu-debug-test"
+            avd = home / (name + ".avd")
+            avd.mkdir()
+            ini = home / (name + ".ini")
+            ini.write_text("path=/outside/avd\n")
+            with self.assertRaisesRegex(ValueError, "registration"):
+                isolated_avd_paths(home, name)
+            ini.write_text("path=" + str(avd) + "\n")
+            external = home / "another-guest-disk"
+            external.write_bytes(b"preserve")
+            (avd / "userdata-qemu.img").symlink_to(external)
+            (avd / "cache.img").write_bytes(b"cache")
+            with self.assertRaisesRegex(ValueError, "symlinks"):
+                isolated_avd_paths(home, name)
+            (avd / "userdata-qemu.img").unlink()
+            os.link(external, avd / "userdata-qemu.img")
+            with self.assertRaisesRegex(ValueError, "hardlinked"):
+                isolated_avd_paths(home, name)
+            self.assertEqual(external.read_bytes(), b"preserve")
+            (avd / "userdata-qemu.img").unlink()
+            (avd / "userdata-qemu.img").write_bytes(b"own")
+            disks = isolated_avd_paths(home, name)
+            command = guest_command(Path('/emulator'), name, 5576, 'host', disks)
+            self.assertEqual(command[command.index('-data') + 1], str(disks[0]))
+            self.assertNotIn('-qemu', command)
+            self.assertNotIn('-no-jni', command)
+            experiment = guest_command(Path('/emulator'), name, 5576, 'host', disks,
+                                       experimental_arm_smp=True)
+            self.assertEqual(experiment[-7:], ['-qemu', '-cpu', 'cortex-a15', '-smp',
+                                              '2', '-accel', 'tcg,thread=multi'])
+            performance = guest_command(Path('/emulator'), name, 5576, 'host', disks,
+                                        experimental_arm_smp=True, disable_jni_checks=True)
+            self.assertLess(performance.index('-no-jni'), performance.index('-qemu'))
+            self.assertEqual(performance[-7:], experiment[-7:])
 
 if __name__ == "__main__": unittest.main()

@@ -250,3 +250,47 @@ performance problem. No ANR threshold, APK, signature or security check was alte
 Acceptance remains partial: public market/daily-chart capture succeeded, emulator
 crash regressions passed, but unattended startup and full authenticated account
 collection did not. Production Stock bindings, Scheduler and P30 remain untouched.
+
+## ARM32 SMP investigation
+
+The kernel supports ARMv7 SMP/PSCI and up to four CPUs, but the old x86-host
+emulator wrapper omits `-smp` for ARM. Forcing two Cortex-A15 CPUs initially
+left CPU1 offline: `CPU1: failed to boot: -19`. Ranchu only emitted the PSCI
+device-tree node for KVM and left the TCG CPU conduit disabled.
+
+Patch 3 moves PSCI node construction after CPU realization and configures its
+HVC conduit for multi-CPU TCG. Single-CPU TCG behavior is unchanged. The rebuilt
+RelWithDebInfo engine hash is
+`fbc831874f717dddcb21eb87899523f49f6fc0ddd7d078c778c9beba877faa11`.
+The guest now reports CPUs `0-1`, and the kernel reports two CPUs booted.
+Three pinned-thread checksum/atomic runs passed with both CPUs used and exactly
+50,000 increments. This is only a targeted concurrency smoke test: the pinned
+ARM build still emits its MTTCG-conversion warning. The option is experimental
+and remains disabled by default.
+
+The experiment exposed a separate cloning pitfall. Installed Apps reside in
+QCOW2 overlays, not just the base IMG. In this old emulator, omitting the matching
+`version_num.cache` causes all overlays to be recreated even if they were copied.
+The original AVD was preserved; empty experimental overlays were retained
+separately, and the test clone was restored and verified with `qemu-img compare`.
+The runner now pins data/cache paths to the chosen AVD and rejects linked disks,
+external QCOW2 backing files and missing/mismatched image-version markers before
+launch. No production userdata was modified.
+
+The dual-CPU, host-GL App run completed 1206 seconds without the previous host
+SIGILL/SIGSEGV. Junhong's main-screen Activity launch record was 66.356 seconds;
+the ordinary-account landing page and holdings login choices rendered. No
+Junhong ANR was found in retained events, but System UI did hit a boot-time ANR
+and was restarted by Android. The broker process later exited in the background
+while Tongdaxin was active; the guest crash buffer was empty, and no specific
+cause is established. This remains a limited public-UI pass, not unattended
+account acceptance.
+
+Tongdaxin rendered its market dashboard and 600999 daily candles, volume and MACD
+ending 2026-10-28. Selected navigation commands took 4.1–6.4 seconds and screenshots
+1.3–2.9 seconds. These differ from the earlier single-CPU observations but are not
+a controlled speedup ratio. A tap can still return before a page changes; in the
+search screen the first tap only closed the keyboard, so the destination was
+checked before the next tap. GDB, emulator PID and both dedicated ports were
+verified released. Fourteen tooling tests and a fresh exact-hash application of
+the PSCI patch passed.

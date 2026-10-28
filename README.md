@@ -27,7 +27,7 @@ python3 scripts/sync_archives.py --workspace /path/to/local/work
 python3 scripts/build_debug.py --workspace /path/to/local/work --jobs 2 --host-cpus 0,1
 ```
 
-For the reviewed TCG and deleted-vertex-buffer fixes, with debug symbols:
+For the reviewed TCG, deleted-vertex-buffer and Ranchu PSCI fixes, with debug symbols:
 
 ```sh
 python3 scripts/apply_patches.py --workspace /path/to/local/work --check
@@ -58,6 +58,37 @@ physical phone, invokes a scheduler, or changes a production binding implicitly.
   local. Do not commit or push them. Findings in `docs/` must be sanitized.
 - Production cutover requires repeatable market capture **and** complete broker
   funds/holdings capture. Do not affect an existing physical-device workload.
+
+## Optional ARM32 dual-CPU experiment
+
+The pinned x86-host wrapper otherwise starts ARM with one guest CPU. The Ranchu
+patch advertises PSCI to multi-CPU TCG guests; two online CPUs and the native
+atomic checksum fixture have been verified. This remains an **experimental**
+option: the old ARM build still warns about MTTCG support, and an atomic smoke
+test does not prove application or memory-model correctness.
+
+```sh
+python3 scripts/run_debug.py --emulator /path/to/work/out/arm32-relwithdebinfo/emulator \
+  --avd-home /path/to/private/avds --android-home /path/to/private/android-home \
+  --avd android-emu-debug-arm32-clone --port 5576 --output /path/to/new/evidence \
+  --gpu host --host-cpus 0,1 --seconds 1200 --experimental-arm-smp
+```
+
+Supply host DISPLAY/XAUTHORITY explicitly for host graphics. Use an offline,
+independent AVD copy, including its `userdata-qemu.img.qcow2`, `cache.img.qcow2`
+when present, and matching `version_num.cache`. Copying only base IMG files loses
+installed Apps. In this old emulator, a missing or mismatched image-version marker
+silently recreates overlays; the runner now refuses that state before starting.
+Writable disks are pinned to the selected AVD. Linked disks, backing paths outside
+that AVD and unsupported QCOW2 features are rejected. System image files may be
+shared read-only. Do not copy live writable disks or use hardlinks.
+
+`--disable-jni-checks` optionally passes upstream `-no-jni` for a recorded
+performance comparison. It disables Android's extra JNI runtime diagnostics,
+not APK/authentication checks. Debug checks stay enabled by default; compare actual
+page readiness and guest crashes rather than treating command-return time as
+an application benchmark. Each diagnostic has a deadline; creating `stop.request`
+in its output directory requests an earlier stop.
 
 ## Upstream licensing
 

@@ -128,6 +128,10 @@
     "android/android-emugl/host/libs/libOpenglRender/tests/OpenGL_unittest.cpp": {
       "before_sha256": "90508fe34317dc0c9947d013c2d8efbac3f4e5fb89a0ba36582d643e4028251b",
       "after_sha256": "8d0822c68b035217042ae5f58717eae3ceb77e4d521c3642ce642085c46fb9fa"
+    },
+    "hw/arm/ranchu.c": {
+      "before_sha256": "fa37d7b43f9512d29f48ce44fa868830fd2336e3eccadb7a45e3ddb2ee3ba99d",
+      "after_sha256": "4fd88a40777751dd4d27f004a277e0ce226ed4ef857fda6a9a4f6142768944fa"
     }
   },
   "patches": [
@@ -173,6 +177,13 @@
         "android/android-emugl/host/libs/Translator/GLcommon/GLEScontext.cpp",
         "android/android-emugl/host/libs/Translator/GLES_V2/GLESv2Imp.cpp",
         "android/android-emugl/host/libs/libOpenglRender/tests/OpenGL_unittest.cpp"
+      ]
+    },
+    {
+      "path": "0003-ranchu-advertise-psci-for-tcg-smp.patch",
+      "sha256": "a2d0172276ae0834ca64d903da8bb83f8bc9f024f7c75c028fd3c7d21466a444",
+      "files": [
+        "hw/arm/ranchu.c"
       ]
     }
   ]

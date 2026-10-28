@@ -1,0 +1,55 @@
+Ranchu: describe and initialize PSCI for opt-in TCG SMP
+
+The existing kernel supports SMP/PSCI, but the TCG board omitted /psci and
+left its CPU conduit disabled, so CPU1 failed to boot with -ENODEV.
+Move PSCI device-tree creation after CPU realization and use the HVC conduit
+for KVM and multi-CPU TCG guests. Single-CPU TCG behavior remains unchanged.
+
+--- a/hw/arm/ranchu.c
++++ b/hw/arm/ranchu.c
+@@ -34,6 +34,7 @@
+ #include "sysemu/ranchu.h"
+ #include "sysemu/sysemu.h"
+ #include "sysemu/kvm.h"
++#include "qemu-common.h"
+ #include "hw/boards.h"
+ #include "exec/address-spaces.h"
+ #include "qemu/bitops.h"
+@@ -188,8 +189,14 @@
+                                 "clk24mhz");
+     qemu_fdt_setprop_cell(fdt, "/apb-pclk", "phandle", vbi->clock_phandle);
+ 
+-    /* No PSCI for TCG yet */
+-    if (kvm_enabled()) {
++    /* The PSCI node is added after CPU realization. */
++}
++
++static void fdt_add_psci_node(const VirtBoardInfo *vbi)
++{
++    void *fdt = vbi->fdt;
++
++    if (kvm_enabled() || (tcg_enabled() && vbi->smp_cpus > 1)) {
+         uint32_t cpu_suspend_fn;
+         uint32_t cpu_off_fn;
+         uint32_t cpu_on_fn;
+@@ -525,6 +532,12 @@
+         }
+         cpuobj = object_new(object_class_get_name(oc));
+ 
++        /* Advertise the same conduit that the firmware node describes. */
++        if (kvm_enabled() || (tcg_enabled() && smp_cpus > 1)) {
++            object_property_set_int(cpuobj, QEMU_PSCI_CONDUIT_HVC,
++                                    "psci-conduit", &error_abort);
++        }
++
+         /* Secondary CPUs start in PSCI powered-down state */
+         if (n > 0) {
+             object_property_set_bool(cpuobj, true, "start-powered-off", NULL);
+@@ -538,6 +551,7 @@
+         object_property_set_bool(cpuobj, true, "realized", NULL);
+     }
+     fdt_add_cpu_nodes(vbi);
++    fdt_add_psci_node(vbi);
+ 
+     memory_region_init_ram_nomigrate(ram, NULL, "ranchu.ram", machine->ram_size,
+                            &error_abort);
