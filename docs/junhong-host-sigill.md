@@ -2,14 +2,15 @@
 
 ## Status
 
-Reproduced twice under GDB in a new, isolated ARM32 AVD on the same Linux x86-64
-host. No root-cause patch is verified yet. The pinned Clang 12.0.5 C/C++ compile-and-link checks and CMake configuration
+Reproduced under GDB in a new, isolated ARM32 AVD on the same Linux x86-64
+host. The 16-bit reset-offset overflow is now confirmed with source symbols.
+The candidate fix compiles; post-fix application validation is still in progress. The pinned Clang 12.0.5 C/C++ compile-and-link checks and CMake configuration
 now pass. The first Debug build completed all 5755 steps in 761.53 seconds;
 its ARM32 headless ELF has .debug_info and .debug_line sections. Large official downloads were
 completed through directory/file fallbacks and a per-request verified Google IP,
 without changing global DNS/proxy settings.
-The scripts in this repository are build/diagnostic tooling, not a finished emulator
-fix. Stock jobs have **not** been switched.
+A compiled candidate patch is available, but full application/account acceptance
+is not complete. Stock jobs have **not** been switched.
 
 ## Baselines
 
@@ -77,7 +78,7 @@ with status zero after printing a signal is not application success.
 - [Official build manifest](https://android.googlesource.com/platform/manifest/+/emu-30-release/default.xml)
 - [QEMU translator internals](https://www.qemu.org/docs/master/devel/tcg.html)
 
-## Additional hypothesis under investigation
+## Early hypothesis (confirmed below)
 
 The pinned baseline stores generated instruction-end and reset-jump offsets in
 16-bit fields but does not reject a generated block exceeding 65535 bytes. The
@@ -95,3 +96,60 @@ on SDK 30.5.3. They do **not** yet reproduce the broker crash and cannot be used
 as proof that the proposed overflow fix addresses it. The full broker path
 remains the required reproduction. The guest regression is a native executable,
 not an APK; it does not access Android accounts or any network service.
+
+## Confirmed root cause and candidate patch
+
+An unpatched `RelWithDebInfo` build reproduced SIGILL on the same broker navigation.
+Its SHA-256 is `480dc1ab280c40a58f9943ac15f8258bf2ee94a0e2b772fd2876fa271e099139`.
+GDB exposed the generated block and reset metadata:
+
+| Measurement | Bytes |
+| --- | ---: |
+| Generated block including slow paths | 157696 |
+| Correct reset continuation from code-buffer start | 113992 |
+| Stored uint16 reset offset | 48456 |
+| Lost offset | 65536 |
+
+The reset jump carried a relative displacement of -65536 and landed inside an
+unrelated instruction. A further SDK baseline instead raised SIGSEGV from the
+same wrong-boundary mechanism. The guest APK is unchanged in both cases.
+
+`patches/0001-tcg-bound-translation-blocks.patch` backports/adapts the upstream
+4000-IR-operation soft limit and an actual generated-byte guard. Oversized blocks
+are regenerated with half as many guest instructions; the TB cache/hash flags
+are preserved. The older fork's target-specific instruction bounds are retained.
+The invalid 0xffff reset-offset sentinel is also reserved. A single instruction
+that cannot fit fails explicitly even in builds defining NDEBUG.
+
+The patch is based on QEMU commits:
+- [IR operation accounting](https://github.com/qemu/qemu/commit/abebf92597186be2bc48d487235da28b1127860f)
+- [4000-operation limit](https://github.com/qemu/qemu/commit/9f754620651d3432114f4bb89c7f12cbea814b3e)
+- [Explicit translation instruction bound](https://github.com/qemu/qemu/commit/8b86d6d25807e13a63ab6ea879f976b9f18cc45a)
+- [Retry oversized translation blocks](https://github.com/qemu/qemu/commit/6e6c4efed995d9eca6ae0cfdb2252df830262f50)
+
+The exact-source patch check passed for all 27 files. The patched symbolized ARM32
+binary compiled in 56.38 seconds (incremental), SHA-256
+`0268c9d08af1362341afe43881ba64f57a498c31f34088204e2c0be205578df9`.
+Ten tooling tests passed. These checks do not yet establish application acceptance.
+
+The unoptimized Debug build reached Android and the broker splash screen but
+suffered system ANRs; it is retained as evidence. The optimized symbol build is
+used for interactive application regression, with DWARF verified in both builds.
+
+## Post-patch graphics failure
+
+The patched host-GL run passed the prior translation failure point, then stopped
+with SIGSEGV on a **rendering** thread in the host `libgallium` (Mesa 25.0.7),
+called by `GLESv2Context::drawWithEmulations` / `glDrawArrays`. This is separate
+from the vCPU TCG code-buffer failure. The fault address was 0x35c; the rendering
+thread has no TCG context. No host driver package was changed.
+
+The same navigation also crashes with bundled `swiftshader_indirect`: the render
+thread reaches `memcpy` in its GLES library at address 0x2c8 through the same
+translator draw call. This rules out an AMD/Mesa-only explanation. A private,
+reversible diagnostic overlay records vertex-buffer state without suppressing
+draws, changing the guest APK, or ignoring signals. No graphics fix is yet proven.
+Until the broker page and repeated collection work, production cutover is blocked. App startup
+also produced an ANR while the main thread parsed its WebView-domain JSON
+configuration; it resumed after one explicit Wait action. This performance issue
+is recorded separately from the emulator crash.

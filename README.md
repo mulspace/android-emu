@@ -27,6 +27,19 @@ python3 scripts/sync_archives.py --workspace /path/to/local/work
 python3 scripts/build_debug.py --workspace /path/to/local/work --jobs 2 --host-cpus 0,1
 ```
 
+For the reviewed TCG offset fix and an optimized build retaining debug symbols:
+
+```sh
+python3 scripts/apply_patches.py --workspace /path/to/local/work --check
+python3 scripts/apply_patches.py --workspace /path/to/local/work
+python3 scripts/build_debug.py --workspace /path/to/local/work --build-type RelWithDebInfo --jobs 2 --host-cpus 0,1
+```
+
+The patch helper checks every changed source file before writing, rejects mixed
+or unrelated source changes, and shares a lock with the build. Debug and
+RelWithDebInfo use separate output directories. Receipts record patch state and
+binary hashes; raw build trees and app evidence are never committed.
+
 Compilation and diagnostic execution are bounded processes. Builds use limited
 parallelism and reduced scheduling priority. No script starts an App, accesses a
 physical phone, invokes a scheduler, or changes a production binding implicitly.
@@ -59,8 +72,9 @@ python3 -m unittest discover -s tests -v
 ```
 
 Read [the current crash investigation](docs/junhong-host-sigill.md) before using
-this repository. The source build and app acceptance are unfinished; a successful
-tooling test does not imply an emulator fix. Archive receipts record the official
+this repository. Symbolized source builds are complete and the TCG offset-overflow cause is
+confirmed. Application/account acceptance remains unfinished; a successful
+tooling test alone does not establish it. Archive receipts record the official
 commit URL and local SHA-256, not an independently signed artifact. Existing
 source directories are preserved and must not be silently replaced on resync.
 For a large archive that repeatedly fails, use the verified-file fallback:

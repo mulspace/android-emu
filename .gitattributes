@@ -1,2 +1,6 @@
 # Preserve the exact bytes of the authoritative upstream manifest.
 upstream/emu-30-release.xml -whitespace
+
+# Unified diff blank context lines intentionally contain one leading space.
+patches/**/*.patch whitespace=-blank-at-eol
+patches/*.patch whitespace=-blank-at-eol

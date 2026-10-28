@@ -14,15 +14,18 @@ import sys
 import time
 
 from owned_process import run
+from apply_patches import source_state
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def configuration(source, build, cmake, ninja):
+def configuration(source, build, cmake, ninja, build_type="Debug"):
+    if build_type not in ("Debug", "RelWithDebInfo"):
+        raise ValueError("Only builds retaining debug information are allowed")
     return [str(cmake), "-H" + str(source), "-B" + str(build), "-G", "Ninja",
         "-DCMAKE_MAKE_PROGRAM=" + str(ninja),
         "-DCMAKE_TOOLCHAIN_FILE=" + str(source / "android/build/cmake/toolchain-linux-x86_64.cmake"),
-        "-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_BUILD_TYPE=" + build_type, "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DOPTION_ASAN_IN_DEBUG=OFF", "-DOPTION_COVERAGE_IN_DEBUG=OFF",
         "-DOPTION_CRASHUPLOAD=NONE", "-DOPTION_MINBUILD=OFF", "-DWEBRTC=OFF",
         "-DQTWEBENGINE=OFF", "-DBLUETOOTH_EMULATION=OFF", "-DOPTION_ASTC_TESTS=OFF",
@@ -36,6 +39,7 @@ def main():
     p.add_argument("--host-cpus", default="14,15")
     p.add_argument("--timeout", type=int, default=7200)
     p.add_argument("--configure-only", action="store_true")
+    p.add_argument("--build-type", choices=("Debug", "RelWithDebInfo"), default="Debug")
     args = p.parse_args()
     if not 30 <= args.timeout <= 14400: p.error("timeout must be 30..14400 seconds")
     cpus = {int(v) for v in args.host_cpus.split(",")}
@@ -51,7 +55,7 @@ def main():
         if not path.is_file(): p.error("Missing pinned build input: " + str(path))
     if shutil.disk_usage(workspace).free < 20 * 1024**3:
         p.error("Less than 20 GiB free; preserve host capacity")
-    build = workspace / "out/arm32-debug"
+    build = workspace / "out" / ("arm32-debug" if args.build_type == "Debug" else "arm32-relwithdebinfo")
     build.mkdir(parents=True, exist_ok=True)
     (workspace / "logs").mkdir(exist_ok=True)
     # Supply the upstream's `python` command locally without changing /usr/bin.
@@ -63,7 +67,7 @@ def main():
     env["PATH"] = str(shim) + os.pathsep + env["PATH"]
     env["CMAKE_BUILD_PARALLEL_LEVEL"] = str(args.jobs)
     prefix = ["taskset", "-c", ",".join(map(str, sorted(cpus))), "nice", "-n", "10"]
-    cmds = [configuration(source, build, cmake, ninja)]
+    cmds = [configuration(source, build, cmake, ninja, args.build_type)]
     if not args.configure_only:
         cmds.append([str(ninja), "-C", str(build), "-j", str(args.jobs),
                      "emulator", "qemu-system-armel-headless"])
@@ -71,11 +75,14 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     record = {"started_at": datetime.datetime.now().astimezone().isoformat(),
-        "commands": cmds, "status": "running", "production_cutover": False,
+        "commands": cmds, "build_type": args.build_type, "status": "running", "production_cutover": False,
         "lock_sha256": hashlib.sha256((ROOT / "sources.lock.json").read_bytes()).hexdigest()}
     receipt = workspace / "logs" / ("build-" + stamp + ".json")
     started = time.monotonic()
-    with (build / ".build.lock").open("w") as lock:
+    with (workspace / ".source.lock").open("a+") as source_lock, (build / ".build.lock").open("w") as lock:
+        fcntl.flock(source_lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        record["source_patch_state"] = source_state(source)
+        record["patch_manifest_sha256"] = hashlib.sha256((ROOT / "patches/series.json").read_bytes()).hexdigest()
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         receipt.write_text(json.dumps(record, indent=2) + "\n")
         try:

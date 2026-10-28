@@ -1,4 +1,5 @@
 import io
+import hashlib
 import os
 from pathlib import Path
 import signal
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from sync_archives import safe_extract
 from owned_process import run, stop_group
 from build_debug import configuration
+from apply_patches import source_state
 from sync_gitiles_tree import git_blob
 
 
@@ -81,7 +83,33 @@ class ProcessTests(unittest.TestCase):
             process.stdout.close()
 
 
+class PatchTests(unittest.TestCase):
+    def test_rejects_changed_and_partially_applied_source(self):
+        digest = lambda data: hashlib.sha256(data).hexdigest()
+        manifest = {"files": {name: {"before_sha256": digest(b"old"),
+                     "after_sha256": digest(b"new")} for name in ("one.c", "two.c")}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in manifest["files"]: (root / name).write_bytes(b"old")
+            self.assertEqual(source_state(root, manifest), "unpatched")
+            (root / "one.c").write_bytes(b"new")
+            with self.assertRaisesRegex(ValueError, "Mixed"):
+                source_state(root, manifest)
+            (root / "two.c").write_bytes(b"new")
+            self.assertEqual(source_state(root, manifest), "patched")
+            (root / "one.c").write_bytes(b"unrelated work")
+            with self.assertRaisesRegex(ValueError, "differs"):
+                source_state(root, manifest)
+            self.assertEqual((root / "one.c").read_bytes(), b"unrelated work")
+
+
 class BuildTests(unittest.TestCase):
+    def test_optimized_build_keeps_symbols_and_rejects_release(self):
+        paths = [Path(p) for p in ('/source', '/build', '/cmake', '/ninja')]
+        self.assertIn('-DCMAKE_BUILD_TYPE=RelWithDebInfo', configuration(*paths, 'RelWithDebInfo'))
+        with self.assertRaises(ValueError):
+            configuration(*paths, 'Release')
+
     def test_blob_digest_matches_git_object_format(self):
         self.assertEqual(git_blob(b""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
         self.assertEqual(git_blob(b"test\n"), "9daeafb9864cf43055ae93beb0afd6c7d144bfa4")

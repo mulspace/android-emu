@@ -1,0 +1,575 @@
+From: android-emu maintainers
+Subject: [PATCH] Bound TCG blocks and retry oversized blocks without wrapping offsets
+
+Backport/adaptation of upstream QEMU commits by Richard Henderson:
+  abebf92597186be2bc48d487235da28b1127860f (track/limit IR operations)
+  9f754620651d3432114f4bb89c7f12cbea814b3e (4000-operation soft limit)
+  8b86d6d25807e13a63ab6ea879f976b9f18cc45a (explicit translation bound)
+  6e6c4efed995d9eca6ae0cfdb2252df830262f50 (retry oversized TBs)
+
+The older Android fork retains per-target instruction-limit calculation;
+pass an additional upper bound and preserve those existing target limits.
+Use a hard failure even with NDEBUG for a single overflowing instruction.
+Reserve the 0xffff jump-offset sentinel. No guest APK or security check is changed.
+QEMU source modifications remain under the original GPL-2.0-or-later terms.
+
+diff --git a/accel/tcg/translate-all.c b/accel/tcg/translate-all.c
+--- a/accel/tcg/translate-all.c
++++ b/accel/tcg/translate-all.c
+@@ -1269,6 +1269,7 @@
+     target_ulong virt_page2;
+     tcg_insn_unit *gen_code_buf;
+     int gen_code_size, search_size;
++    int max_insns = TCG_MAX_INSNS;
+ #ifdef CONFIG_PROFILER
+     TCGProfile *prof = &tcg_ctx->prof;
+     int64_t ti;
+@@ -1297,6 +1298,8 @@
+     tb->trace_vcpu_dstate = *cpu->trace_dstate;
+     tcg_ctx->tb_cflags = cflags;
+ 
++ tb_overflow:
++
+ #ifdef CONFIG_PROFILER
+     /* includes aborted translations because of exceptions */
+     atomic_set(&prof->tb_count1, prof->tb_count1 + 1);
+@@ -1306,7 +1309,7 @@
+     tcg_func_start(tcg_ctx);
+ 
+     tcg_ctx->cpu = ENV_GET_CPU(env);
+-    gen_intermediate_code(cpu, tb);
++    gen_intermediate_code(cpu, tb, max_insns);
+     tcg_ctx->cpu = NULL;
+ 
+     trace_translate_block(tb, tb->pc, tb->tc.ptr);
+@@ -1336,6 +1339,15 @@
+        re-initialize it per above, and re-do the actual code generation.  */
+     gen_code_size = tcg_gen_code(tcg_ctx, tb);
+     if (unlikely(gen_code_size < 0)) {
++        if (gen_code_size == -2) {
++            /* A single TB, not the shared code buffer, is too large.
++             * Preserve cflags/hash identity and retry with fewer insns. */
++            if (tb->icount <= 1) {
++                cpu_abort(cpu, "TCG single instruction exceeds 16-bit TB offsets");
++            }
++            max_insns = tb->icount / 2;
++            goto tb_overflow;
++        }
+         goto buffer_overflow;
+     }
+     search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+diff --git a/accel/tcg/translator.c b/accel/tcg/translator.c
+--- a/accel/tcg/translator.c
++++ b/accel/tcg/translator.c
+@@ -32,7 +32,7 @@
+ }
+ 
+ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
+-                     CPUState *cpu, TranslationBlock *tb)
++                     CPUState *cpu, TranslationBlock *tb, int max_insns_limit)
+ {
+     int max_insns;
+ 
+@@ -56,6 +56,7 @@
+         max_insns = 1;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     max_insns = ops->init_disas_context(db, cpu, max_insns);
+     tcg_debug_assert(db->is_jmp == DISAS_NEXT);  /* no early exit */
+ 
+diff --git a/include/exec/exec-all.h b/include/exec/exec-all.h
+--- a/include/exec/exec-all.h
++++ b/include/exec/exec-all.h
+@@ -40,7 +40,8 @@
+ 
+ #include "qemu/log.h"
+ 
+-void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb);
++void gen_intermediate_code(CPUState *cpu, struct TranslationBlock *tb,
++                           int max_insns_limit);
+ void restore_state_to_opc(CPUArchState *env, struct TranslationBlock *tb,
+                           target_ulong *data);
+ 
+diff --git a/include/exec/translator.h b/include/exec/translator.h
+--- a/include/exec/translator.h
++++ b/include/exec/translator.h
+@@ -137,7 +137,7 @@
+  * - When too many instructions have been translated.
+  */
+ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
+-                     CPUState *cpu, TranslationBlock *tb);
++                     CPUState *cpu, TranslationBlock *tb, int max_insns_limit);
+ 
+ void translator_loop_temp_check(DisasContextBase *db);
+ 
+diff --git a/target/alpha/translate.c b/target/alpha/translate.c
+--- a/target/alpha/translate.c
++++ b/target/alpha/translate.c
+@@ -3051,10 +3051,10 @@
+     .disas_log          = alpha_tr_disas_log,
+ };
+ 
+-void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int max_insns_limit)
+ {
+     DisasContext dc;
+-    translator_loop(&alpha_tr_ops, &dc.base, cpu, tb);
++    translator_loop(&alpha_tr_ops, &dc.base, cpu, tb, max_insns_limit);
+ }
+ 
+ void restore_state_to_opc(CPUAlphaState *env, TranslationBlock *tb,
+diff --git a/target/arm/translate.c b/target/arm/translate.c
+--- a/target/arm/translate.c
++++ b/target/arm/translate.c
+@@ -12716,7 +12716,7 @@
+ };
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int max_insns_limit)
+ {
+     DisasContext dc;
+     const TranslatorOps *ops = &arm_translator_ops;
+@@ -12730,7 +12730,7 @@
+     }
+ #endif
+ 
+-    translator_loop(ops, &dc.base, cpu, tb);
++    translator_loop(ops, &dc.base, cpu, tb, max_insns_limit);
+ }
+ 
+ static const char *cpu_mode_names[16] = {
+diff --git a/target/cris/translate.c b/target/cris/translate.c
+--- a/target/cris/translate.c
++++ b/target/cris/translate.c
+@@ -3084,7 +3084,7 @@
+  */
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUCRISState *env = cs->env_ptr;
+     uint32_t pc_start;
+@@ -3148,6 +3148,7 @@
+         max_insns = TCG_MAX_INSNS;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         tcg_gen_insn_start(dc->delayed_branch == 1
+diff --git a/target/hppa/translate.c b/target/hppa/translate.c
+--- a/target/hppa/translate.c
++++ b/target/hppa/translate.c
+@@ -4904,11 +4904,11 @@
+     .disas_log          = hppa_tr_disas_log,
+ };
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ 
+ {
+     DisasContext ctx;
+-    translator_loop(&hppa_tr_ops, &ctx.base, cs, tb);
++    translator_loop(&hppa_tr_ops, &ctx.base, cs, tb, max_insns_limit);
+ }
+ 
+ void restore_state_to_opc(CPUHPPAState *env, TranslationBlock *tb,
+diff --git a/target/i386/translate.c b/target/i386/translate.c
+--- a/target/i386/translate.c
++++ b/target/i386/translate.c
+@@ -8583,11 +8583,11 @@
+ };
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cpu, TranslationBlock *tb, int max_insns_limit)
+ {
+     DisasContext dc;
+ 
+-    translator_loop(&i386_tr_ops, &dc.base, cpu, tb);
++    translator_loop(&i386_tr_ops, &dc.base, cpu, tb, max_insns_limit);
+ }
+ 
+ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
+diff --git a/target/lm32/translate.c b/target/lm32/translate.c
+--- a/target/lm32/translate.c
++++ b/target/lm32/translate.c
+@@ -1049,7 +1049,7 @@
+ }
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPULM32State *env = cs->env_ptr;
+     LM32CPU *cpu = lm32_env_get_cpu(env);
+@@ -1085,6 +1085,7 @@
+         max_insns = TCG_MAX_INSNS;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         tcg_gen_insn_start(dc->pc);
+diff --git a/target/m68k/translate.c b/target/m68k/translate.c
+--- a/target/m68k/translate.c
++++ b/target/m68k/translate.c
+@@ -6064,7 +6064,7 @@
+ }
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUM68KState *env = cs->env_ptr;
+     DisasContext dc1, *dc = &dc1;
+@@ -6097,6 +6097,7 @@
+ 
+     init_release_array(dc);
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         pc_offset = dc->pc - pc_start;
+diff --git a/target/microblaze/translate.c b/target/microblaze/translate.c
+--- a/target/microblaze/translate.c
++++ b/target/microblaze/translate.c
+@@ -1630,7 +1630,7 @@
+ }
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUMBState *env = cs->env_ptr;
+     MicroBlazeCPU *cpu = mb_env_get_cpu(env);
+@@ -1673,6 +1673,7 @@
+         max_insns = TCG_MAX_INSNS;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do
+     {
+diff --git a/target/mips/translate.c b/target/mips/translate.c
+--- a/target/mips/translate.c
++++ b/target/mips/translate.c
+@@ -20634,7 +20634,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUMIPSState *env = cs->env_ptr;
+     DisasContext ctx;
+@@ -20691,6 +20691,7 @@
+     }
+ 
+     LOG_DISAS("\ntb %p idx %d hflags %04x\n", tb, ctx.mem_idx, ctx.hflags);
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     while (ctx.bstate == BS_NONE) {
+         tcg_gen_insn_start(ctx.pc, ctx.hflags & MIPS_HFLAG_BMASK, ctx.btarget);
+diff --git a/target/moxie/translate.c b/target/moxie/translate.c
+--- a/target/moxie/translate.c
++++ b/target/moxie/translate.c
+@@ -813,7 +813,7 @@
+ }
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUMoxieState *env = cs->env_ptr;
+     MoxieCPU *cpu = moxie_env_get_cpu(env);
+@@ -837,6 +837,7 @@
+         max_insns = TCG_MAX_INSNS;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         tcg_gen_insn_start(ctx.pc);
+diff --git a/target/nios2/translate.c b/target/nios2/translate.c
+--- a/target/nios2/translate.c
++++ b/target/nios2/translate.c
+@@ -805,7 +805,7 @@
+ }
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUNios2State *env = cs->env_ptr;
+     DisasContext dc1, *dc = &dc1;
+@@ -839,6 +839,7 @@
+         }
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         tcg_gen_insn_start(dc->pc);
+diff --git a/target/openrisc/translate.c b/target/openrisc/translate.c
+--- a/target/openrisc/translate.c
++++ b/target/openrisc/translate.c
+@@ -1521,7 +1521,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUOpenRISCState *env = cs->env_ptr;
+     OpenRISCCPU *cpu = openrisc_env_get_cpu(env);
+@@ -1559,6 +1559,7 @@
+         qemu_log("IN: %s\n", lookup_symbol(pc_start));
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+ 
+     /* Allow the TCG optimizer to see that R0 == 0,
+diff --git a/target/ppc/translate.c b/target/ppc/translate.c
+--- a/target/ppc/translate.c
++++ b/target/ppc/translate.c
+@@ -7422,11 +7422,11 @@
+     .disas_log          = ppc_tr_disas_log,
+ };
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     DisasContext ctx;
+ 
+-    translator_loop(&ppc_tr_ops, &ctx.base, cs, tb);
++    translator_loop(&ppc_tr_ops, &ctx.base, cs, tb, max_insns_limit);
+ }
+ 
+ void restore_state_to_opc(CPUPPCState *env, TranslationBlock *tb,
+diff --git a/target/riscv/translate.c b/target/riscv/translate.c
+--- a/target/riscv/translate.c
++++ b/target/riscv/translate.c
+@@ -1844,7 +1844,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int max_insns_limit)
+ {
+     CPURISCVState *env = cs->env_ptr;
+     DisasContext ctx;
+@@ -1874,6 +1874,7 @@
+     if (max_insns > TCG_MAX_INSNS) {
+         max_insns = TCG_MAX_INSNS;
+     }
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+ 
+     while (ctx.bstate == BS_NONE) {
+diff --git a/target/s390x/translate.c b/target/s390x/translate.c
+--- a/target/s390x/translate.c
++++ b/target/s390x/translate.c
+@@ -6158,7 +6158,7 @@
+     return ret;
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUS390XState *env = cs->env_ptr;
+     DisasContext dc;
+@@ -6192,6 +6192,7 @@
+         max_insns = TCG_MAX_INSNS;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+ 
+     do {
+diff --git a/target/sh4/translate.c b/target/sh4/translate.c
+--- a/target/sh4/translate.c
++++ b/target/sh4/translate.c
+@@ -2258,7 +2258,7 @@
+ }
+ #endif
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUSH4State *env = cs->env_ptr;
+     DisasContext ctx;
+@@ -2299,6 +2299,7 @@
+         max_insns = 1;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     num_insns = 0;
+ 
+diff --git a/target/sparc/translate.c b/target/sparc/translate.c
+--- a/target/sparc/translate.c
++++ b/target/sparc/translate.c
+@@ -5738,7 +5738,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, TranslationBlock * tb)
++void gen_intermediate_code(CPUState *cs, TranslationBlock * tb, int max_insns_limit)
+ {
+     CPUSPARCState *env = cs->env_ptr;
+     target_ulong pc_start, last_pc;
+@@ -5779,6 +5779,7 @@
+         max_insns = TCG_MAX_INSNS;
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         if (dc->npc & JUMP_PC) {
+diff --git a/target/tilegx/translate.c b/target/tilegx/translate.c
+--- a/target/tilegx/translate.c
++++ b/target/tilegx/translate.c
+@@ -2369,7 +2369,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUTLGState *env = cs->env_ptr;
+     DisasContext ctx;
+@@ -2401,6 +2401,7 @@
+     if (max_insns > TCG_MAX_INSNS) {
+         max_insns = TCG_MAX_INSNS;
+     }
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+ 
+     while (1) {
+diff --git a/target/tricore/translate.c b/target/tricore/translate.c
+--- a/target/tricore/translate.c
++++ b/target/tricore/translate.c
+@@ -8807,7 +8807,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, struct TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUTriCoreState *env = cs->env_ptr;
+     DisasContext ctx;
+@@ -8835,6 +8835,7 @@
+     ctx.mem_idx = cpu_mmu_index(env, false);
+ 
+     tcg_clear_temp_count();
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     while (ctx.bstate == BS_NONE) {
+         tcg_gen_insn_start(ctx.pc);
+diff --git a/target/unicore32/translate.c b/target/unicore32/translate.c
+--- a/target/unicore32/translate.c
++++ b/target/unicore32/translate.c
+@@ -1870,7 +1870,7 @@
+ }
+ 
+ /* generate intermediate code for basic block 'tb'.  */
+-void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUUniCore32State *env = cs->env_ptr;
+     DisasContext dc1, *dc = &dc1;
+@@ -1912,6 +1912,7 @@
+     }
+ #endif
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+     do {
+         tcg_gen_insn_start(dc->pc);
+diff --git a/target/xtensa/translate.c b/target/xtensa/translate.c
+--- a/target/xtensa/translate.c
++++ b/target/xtensa/translate.c
+@@ -1054,7 +1054,7 @@
+     }
+ }
+ 
+-void gen_intermediate_code(CPUState *cs, TranslationBlock *tb)
++void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int max_insns_limit)
+ {
+     CPUXtensaState *env = cs->env_ptr;
+     DisasContext dc;
+@@ -1097,6 +1097,7 @@
+         dc.next_icount = tcg_temp_local_new_i32();
+     }
+ 
++    max_insns = MIN(max_insns, max_insns_limit);
+     gen_tb_start(tb);
+ 
+     if ((tb_cflags(tb) & CF_USE_ICOUNT) &&
+diff --git a/tcg/tcg.c b/tcg/tcg.c
+--- a/tcg/tcg.c
++++ b/tcg/tcg.c
+@@ -866,6 +866,7 @@
+     /* No temps have been previously allocated for size or locality.  */
+     memset(s->free_temps, 0, sizeof(s->free_temps));
+ 
++    s->nb_ops = 0;
+     s->nb_labels = 0;
+     s->current_frame_offset = s->frame_start;
+ 
+@@ -1983,6 +1984,7 @@
+ {
+     QTAILQ_REMOVE(&s->ops, op, link);
+     QTAILQ_INSERT_TAIL(&s->free_ops, op, link);
++    s->nb_ops--;
+ 
+ #ifdef CONFIG_PROFILER
+     atomic_set(&s->prof.del_op_count, s->prof.del_op_count + 1);
+@@ -2002,6 +2004,7 @@
+     }
+     memset(op, 0, offsetof(TCGOp, link));
+     op->opc = opc;
++    s->nb_ops++;
+ 
+     return op;
+ }
+@@ -3392,6 +3395,12 @@
+            generating code without having to check during generation.  */
+         if (unlikely((void *)s->code_ptr > s->code_gen_highwater)) {
+             return -1;
++        }
++        /* Do not publish a TB whose 16-bit offsets have wrapped.  The
++         * caller regenerates it with fewer guest instructions.  Reserve
++         * 0xffff, which is the invalid jump-reset-offset sentinel. */
++        if (unlikely(tcg_current_code_size(s) >= UINT16_MAX)) {
++            return -2;
+         }
+     }
+     tcg_debug_assert(num_insns >= 0);
+diff --git a/tcg/tcg.h b/tcg/tcg.h
+--- a/tcg/tcg.h
++++ b/tcg/tcg.h
+@@ -655,6 +655,7 @@
+     int nb_globals;
+     int nb_temps;
+     int nb_indirects;
++    int nb_ops;
+ 
+     /* goto_tb support */
+     tcg_insn_unit *code_buf;
+@@ -844,7 +845,9 @@
+ /* Test for whether to terminate the TB for using too many opcodes.  */
+ static inline bool tcg_op_buf_full(void)
+ {
+-    return false;
++    /* Soft limit from upstream QEMU: avoid very large expansions of a
++     * guest instruction stream. tcg_gen_code also enforces the byte limit. */
++    return tcg_ctx->nb_ops >= 4000;
+ }
+ 
+ /* pool based memory allocation */
