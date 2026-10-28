@@ -131,6 +131,14 @@ class PatchTests(unittest.TestCase):
 
 
 class BuildTests(unittest.TestCase):
+    def test_tlb_capacity_is_explicit_and_default_remains_256(self):
+        paths = [Path(p) for p in ('/source', '/build', '/cmake', '/ninja')]
+        self.assertIn('-DOPTION_ARM_TLB_BITS=8', configuration(*paths))
+        self.assertIn('-DOPTION_ARM_TLB_BITS=10', configuration(*paths, arm_tlb_bits=10))
+        for value in (True, 0, 9, 11, '10'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                configuration(*paths, arm_tlb_bits=value)
+
     def test_optimized_build_keeps_symbols_and_rejects_release(self):
         paths = [Path(p) for p in ('/source', '/build', '/cmake', '/ninja')]
         self.assertIn('-DCMAKE_BUILD_TYPE=RelWithDebInfo', configuration(*paths, 'RelWithDebInfo'))

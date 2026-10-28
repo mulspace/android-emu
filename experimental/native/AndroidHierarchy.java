@@ -41,7 +41,19 @@ public final class AndroidHierarchy {
         public boolean password(){return node.isPassword();}
         public int inputType(){return node.getInputType();}
         public int childCount(){return node.getChildCount();}
-        public SinglePassHierarchy.Node child(int index){AccessibilityNodeInfo child=node.getChild(index);return child==null?null:new Node(child,width,height);}
+        public SinglePassHierarchy.Node child(int index){
+            AccessibilityNodeInfo child=node.getChild(index);
+            if(child==null) {
+                int before=node.getChildCount();
+                boolean refreshed=node.refresh();
+                android.util.Log.i("EmuObservation", "missing_child_refresh refreshed=" + refreshed
+                    + " before=" + before + " after=" + node.getChildCount() + " index=" + index);
+                // This traversal still fails. Never skip an absent child or accept
+                // a partial sensitivity scan; a later complete traversal is required.
+                return null;
+            }
+            return new Node(child,width,height);
+        }
         public void recycle(){node.recycle();}
         public Map<String,String> attributes(){
             Map<String,String> out=new LinkedHashMap<>();
@@ -70,13 +82,20 @@ public final class AndroidHierarchy {
         try {
             check.alive();
             AccessibilityNodeInfo active=automation.getRootInActiveWindow();
-            if(active==null)throw new SnapshotCapture.IncompleteHierarchy();
+            if(active==null) {
+                android.util.Log.i("EmuObservation", "incomplete_active_root");
+                throw new SnapshotCapture.IncompleteHierarchy();
+            }
             owned.add(active);
             windows=automation.getWindows();
             if(windows!=null)for(AccessibilityWindowInfo window:windows) {
                 check.alive();
                 AccessibilityNodeInfo root=window.getRoot();
-                if(root==null)throw new SnapshotCapture.IncompleteHierarchy();
+                if(root==null) {
+                    android.util.Log.i("EmuObservation", "incomplete_window_root type=" + window.getType()
+                        + " active=" + window.isActive() + " focused=" + window.isFocused());
+                    throw new SnapshotCapture.IncompleteHierarchy();
+                }
                 if(!owned.add(root)) {
                     boolean same=false;for(AccessibilityNodeInfo existing:owned)if(existing==root)same=true;
                     if(!same)root.recycle();
@@ -86,6 +105,8 @@ public final class AndroidHierarchy {
             for(AccessibilityNodeInfo root:owned)roots.add(new Node(root,width,height));
             return new Result(SinglePassHierarchy.capture(roots,rotation,check));
         } catch(SinglePassHierarchy.IncompleteHierarchy error) {
+            android.util.Log.i("EmuObservation", "incomplete_child depth=" + error.depth
+                + " index=" + error.index + " visited=" + error.visited);
             throw new SnapshotCapture.IncompleteHierarchy();
         } finally {
             for(AccessibilityNodeInfo root:owned)root.recycle();

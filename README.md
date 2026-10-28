@@ -112,6 +112,26 @@ Capacity is verified through the monitor. See
 [the measured comparison](docs/tcg-cache-diagnostics.md); cache statistics alone
 are not proof of faster or stable App collection.
 
+## Opt-in ARM32 TLB experiment
+
+See [the measured results and remaining limits](docs/tlb-capacity-diagnostics.md).
+
+`build_debug.py --arm-tlb-bits 10 --build-type RelWithDebInfo` builds a 1024-entry
+software TLB for ARM32 guest executables only. The default remains 8 (256 entries).
+The original displacement bound and all permission/invalidation paths remain in
+place. This experiment is restricted to Linux x86-64 hosts. Preserve an independent
+copy of the baseline runtime before rebuilding; the output directory is reused.
+
+Before App tests, compile `tests/guest/arm_mmu_smoke.c` with the Android NDK's
+`armv7a-linux-androideabi24-clang -std=c11 -O2 -g -Wall -Wextra -Werror`.
+Run `scripts/run_mmu_fixture.py --run-dir RUN --adb ADB --fixture ARM_ELF
+--output NEW_JSON` against an owned `emulator-5576` diagnostic. It checks the ELF
+architecture and executes three bounded trials, then removes its unique temporary
+guest executable. Each trial covers permissions, COW, shared aliases, cross-CPU
+mapping replacements, discarded pages, and 48 executable-code updates. It also
+reports timings for 128/512/2048-page working sets. A host-only pass is rejected.
+These are focused smoke tests, not proof of all CPU/MMU behavior or App acceptance.
+
 ## Upstream licensing
 
 The fetched QEMU/Android sources retain their original licenses and notices.

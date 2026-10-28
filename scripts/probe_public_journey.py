@@ -83,7 +83,18 @@ class Journey:
 
     async def wait(self, phase, selector):
         for attempt in range(8):
-            frame = await self.capture(f"{phase}_{attempt+1}", {"include_image": False, "include_xml": True})
+            try:
+                frame = await self.capture(f"{phase}_{attempt+1}", {"include_image": False, "include_xml": True})
+            except Exception as error:
+                # Startup can briefly expose no root or a disappearing node. Only
+                # retry this read; never repeat an action, timeout or denied surface.
+                diagnostic = getattr(error, "native_diagnostic", None)
+                if not isinstance(diagnostic, dict) or diagnostic.get("phase") != "snapshot_incomplete_hierarchy":
+                    raise
+                if attempt == 7:
+                    raise
+                await self.pause(2)
+                continue
             chosen = selector(nodes(frame, self.package))
             if chosen is not None:
                 return frame, chosen

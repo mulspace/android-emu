@@ -40,12 +40,23 @@ def instrument(source):
     return source[:start] + block + source[end:]
 
 
+
+def retry_incomplete_checked(source):
+    """Keep the exact expected observation while retrying only absent-node reads."""
+    old = "if (expected != null || attempt == 2) throw changed;"
+    new = "if (attempt == 2 || (expected != null && changed instanceof UnstableSurface)) throw changed;"
+    if source.count(old) != 1:
+        raise ValueError("Checked retry source anchor changed")
+    return source.replace(old, new)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kengent-root", type=Path, required=True)
     parser.add_argument("--sdk-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--single-pass", action="store_true", help="Experimental complete tree/sensitivity traversal; not a production build")
+    parser.add_argument("--retry-incomplete-checked", action="store_true", help="Diagnostic: retry missing nodes at most three times without changing the expected frame")
     parser.add_argument("--experimental-source", type=Path, default=Path(__file__).resolve().parents[1] / "experimental/native")
     args = parser.parse_args()
     os.umask(0o077)
@@ -72,6 +83,9 @@ def main():
 ''' + instrumented[last:]
         for name in ("SinglePassHierarchy.java", "AndroidHierarchy.java"):
             shutil.copyfile(args.experimental_source / name, copied / name)
+    if args.retry_incomplete_checked:
+        checks = copied / "SnapshotCapture.java"
+        checks.write_text(retry_incomplete_checked(checks.read_text()))
     source.write_text(instrumented)
     resource_files = android.resources.files
     def resources(name):
@@ -81,7 +95,7 @@ def main():
     shutil.copyfile(engine, args.output / "u2.jar")
     shutil.copyfile(bridge, args.output / "bridge.jar")
     receipt = {"diagnostic_only": True, "device_operations": False, "experimental_single_pass": args.single_pass,
-               "source_hashes": before,
+               "experimental_checked_retry": args.retry_incomplete_checked, "source_hashes": before,
                "built_source_hashes": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in copied.glob("*.java")},
                "bridge_sha256": hashlib.sha256(bridge.read_bytes()).hexdigest(),
                "instrumented_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}

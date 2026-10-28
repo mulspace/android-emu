@@ -1,0 +1,56 @@
+--- a/include/exec/cpu-defs.h
++++ b/include/exec/cpu-defs.h
+@@ -88,8 +88,22 @@
+  * 0x18 (the offset of the addend field in each TLB entry) plus the offset
+  * of tlb_table inside env (which is non-trivial but not huge).
+  */
++/* Optional Android ARM32 diagnostic. Keep the upstream default unchanged.
++ * The existing displacement bound still applies to every emitted TLB access. */
++#if defined(ANDROID_EMU_ARM_TLB_BITS)
++# if !defined(TARGET_ARM) || defined(TARGET_AARCH64) || !defined(__x86_64__) || HOST_LONG_BITS != 64
++#  error "ARM TLB diagnostic requires an ARM32 guest on an x86_64 host"
++# endif
++# if ANDROID_EMU_ARM_TLB_BITS != 10
++#  error "Only the reviewed 1024-entry ARM TLB experiment is supported"
++# endif
++# define CPU_TLB_BITS_CAP ANDROID_EMU_ARM_TLB_BITS
++#else
++# define CPU_TLB_BITS_CAP 8
++#endif
++
+ #define CPU_TLB_BITS                                             \
+-    MIN(8,                                                       \
++    MIN(CPU_TLB_BITS_CAP,                                        \
+         TCG_TARGET_TLB_DISPLACEMENT_BITS - CPU_TLB_ENTRY_BITS -  \
+         (NB_MMU_MODES <= 1 ? 0 :                                 \
+          NB_MMU_MODES <= 2 ? 1 :                                 \
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -83,6 +83,14 @@
+       BOOL
+       "True if we should build a minimum set of components to support 64-bit guets only."
+ )
++set(OPTION_ARM_TLB_BITS "8" CACHE STRING "ARM32 TLB bits: 8 upstream default, 10 isolated diagnostic")
++if(NOT OPTION_ARM_TLB_BITS MATCHES "^(8|10)$")
++  message(FATAL_ERROR "OPTION_ARM_TLB_BITS must be 8 or 10")
++endif()
++if(OPTION_ARM_TLB_BITS STREQUAL "10" AND NOT LINUX_X86_64)
++  message(FATAL_ERROR "The ARM32 TLB diagnostic requires a Linux x86_64 host")
++endif()
++
+ set(OPTION_TCMALLOC
+     TRUE
+     CACHE
+@@ -911,6 +919,12 @@
+       i386 "${ANDROID_QEMU_i386_DEVICES_${ANDROID_TARGET_TAG}}")
+     android_add_qemu_headless_executable(
+       armel "${ANDROID_QEMU_arm_DEVICES_${ANDROID_TARGET_TAG}}")
++    if(OPTION_ARM_TLB_BITS STREQUAL "10")
++      # All ARM32 CPU-state users are in these target-specific executables.
++      # Common libraries deliberately poison architecture-specific config.
++      target_compile_definitions(qemu-system-armel PRIVATE ANDROID_EMU_ARM_TLB_BITS=10)
++      target_compile_definitions(qemu-system-armel-headless PRIVATE ANDROID_EMU_ARM_TLB_BITS=10)
++    endif()
+   endif()
+ 
+   # The tests currently work on linux x86 only.

@@ -47,7 +47,7 @@ public class HierarchyProbe {
   N secret=new N();secret.password=true;secret.text="PRIVATE-SECRET";result=run(secret);
   check(result.sensitive.size()==1 && !result.xml.contains("PRIVATE-SECRET"));
   N missing=new N(),good=new N();missing.children.add(good);missing.children.add(null);
-  try {run(missing);throw new AssertionError();}catch(SinglePassHierarchy.IncompleteHierarchy expected){}
+  try {run(missing);throw new AssertionError();}catch(SinglePassHierarchy.IncompleteHierarchy expected){check(expected.depth==1 && expected.index==1 && expected.visited==2);}
   check(good.recycled==1);
   N deep=new N(),tail=deep;for(int i=0;i<81;i++){N n=new N();tail.children.add(n);tail=n;}
   try {run(deep);throw new AssertionError();}catch(IllegalStateException expected){}

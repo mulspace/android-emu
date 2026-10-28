@@ -19,13 +19,15 @@ from apply_patches import source_state
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def configuration(source, build, cmake, ninja, build_type="Debug"):
+def configuration(source, build, cmake, ninja, build_type="Debug", arm_tlb_bits=8):
     if build_type not in ("Debug", "RelWithDebInfo"):
         raise ValueError("Only builds retaining debug information are allowed")
+    if type(arm_tlb_bits) is not int or arm_tlb_bits not in (8, 10):
+        raise ValueError("ARM TLB bits must be the default 8 or explicit diagnostic 10")
     return [str(cmake), "-H" + str(source), "-B" + str(build), "-G", "Ninja",
         "-DCMAKE_MAKE_PROGRAM=" + str(ninja),
         "-DCMAKE_TOOLCHAIN_FILE=" + str(source / "android/build/cmake/toolchain-linux-x86_64.cmake"),
-        "-DCMAKE_BUILD_TYPE=" + build_type, "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_BUILD_TYPE=" + build_type, "-DOPTION_ARM_TLB_BITS=" + str(arm_tlb_bits), "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         "-DOPTION_ASAN_IN_DEBUG=OFF", "-DOPTION_COVERAGE_IN_DEBUG=OFF",
         "-DOPTION_CRASHUPLOAD=NONE", "-DOPTION_MINBUILD=OFF", "-DWEBRTC=OFF",
         "-DQTWEBENGINE=OFF", "-DBLUETOOTH_EMULATION=OFF", "-DOPTION_ASTC_TESTS=OFF",
@@ -40,6 +42,8 @@ def main():
     p.add_argument("--timeout", type=int, default=7200)
     p.add_argument("--configure-only", action="store_true")
     p.add_argument("--build-type", choices=("Debug", "RelWithDebInfo"), default="Debug")
+    p.add_argument("--arm-tlb-bits", type=int, choices=(8, 10), default=8,
+                   help="Keep 256-entry TLBs by default; 1024 entries is an isolated experiment")
     args = p.parse_args()
     if not 30 <= args.timeout <= 14400: p.error("timeout must be 30..14400 seconds")
     cpus = {int(v) for v in args.host_cpus.split(",")}
@@ -67,7 +71,7 @@ def main():
     env["PATH"] = str(shim) + os.pathsep + env["PATH"]
     env["CMAKE_BUILD_PARALLEL_LEVEL"] = str(args.jobs)
     prefix = ["taskset", "-c", ",".join(map(str, sorted(cpus))), "nice", "-n", "10"]
-    cmds = [configuration(source, build, cmake, ninja, args.build_type)]
+    cmds = [configuration(source, build, cmake, ninja, args.build_type, args.arm_tlb_bits)]
     if not args.configure_only:
         cmds.append([str(ninja), "-C", str(build), "-j", str(args.jobs),
                      "emulator", "qemu-system-armel-headless"])
@@ -75,7 +79,7 @@ def main():
     signal.signal(signal.SIGTERM, interrupted)
     stamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
     record = {"started_at": datetime.datetime.now().astimezone().isoformat(),
-        "commands": cmds, "build_type": args.build_type, "status": "running", "production_cutover": False,
+        "commands": cmds, "build_type": args.build_type, "arm_tlb_bits": args.arm_tlb_bits, "status": "running", "production_cutover": False,
         "lock_sha256": hashlib.sha256((ROOT / "sources.lock.json").read_bytes()).hexdigest()}
     receipt = workspace / "logs" / ("build-" + stamp + ".json")
     started = time.monotonic()

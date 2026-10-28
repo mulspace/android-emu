@@ -7,7 +7,12 @@ import java.util.Map;
 /** Experimental complete, single traversal; no Android input or hidden-node shortcut. */
 public final class SinglePassHierarchy {
     private SinglePassHierarchy() {}
-    public static final class IncompleteHierarchy extends IllegalStateException {}
+    public static final class IncompleteHierarchy extends IllegalStateException {
+        public final int depth, index, visited;
+        IncompleteHierarchy(int depth, int index, int visited) {
+            this.depth=depth; this.index=index; this.visited=visited;
+        }
+    }
     public interface Node {
         boolean visible();
         boolean password();
@@ -62,7 +67,7 @@ public final class SinglePassHierarchy {
     private static void visit(Node node,int depth,int index,boolean render,Check check,
                               Result result,StringBuilder xml)throws Exception {
         check.alive();
-        if(node==null)throw new IncompleteHierarchy();
+        if(node==null)throw new IncompleteHierarchy(depth,index,result.nodeCount);
         if(depth>80 || ++result.nodeCount>10000)throw new IllegalStateException();
         boolean visible=node.visible();
         int input=node.inputType(), kind=input&15, variation=input&4080;
@@ -87,7 +92,7 @@ public final class SinglePassHierarchy {
         for(int childIndex=0;childIndex<count;childIndex++) {
             check.alive();
             Node child=node.child(childIndex);
-            if(child==null)throw new IncompleteHierarchy();
+            if(child==null)throw new IncompleteHierarchy(depth+1,childIndex,result.nodeCount);
             try { visit(child,depth+1,childIndex,render && child.visible(),check,result,xml); }
             finally { child.recycle(); }
         }

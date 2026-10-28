@@ -132,6 +132,14 @@
     "hw/arm/ranchu.c": {
       "before_sha256": "fa37d7b43f9512d29f48ce44fa868830fd2336e3eccadb7a45e3ddb2ee3ba99d",
       "after_sha256": "4fd88a40777751dd4d27f004a277e0ce226ed4ef857fda6a9a4f6142768944fa"
+    },
+    "include/exec/cpu-defs.h": {
+      "before_sha256": "32cdc94bab90a84d5879bc84e97183e43b886da72f69d1924f15f3397a453561",
+      "after_sha256": "7030deaa6822928d64e7af02e97a9eb447d776d0e7bc234be9c726444556d702"
+    },
+    "CMakeLists.txt": {
+      "before_sha256": "8de9342119668080e17f81e945208c8b6b8c3588f56c04fc6b5d20c14296cc92",
+      "after_sha256": "b771891ad90f2b9e8108c7c5fc330d8a61f4c2b63353f96652df72078c242487"
     }
   },
   "patches": [
@@ -184,6 +192,14 @@
       "sha256": "a2d0172276ae0834ca64d903da8bb83f8bc9f024f7c75c028fd3c7d21466a444",
       "files": [
         "hw/arm/ranchu.c"
+      ]
+    },
+    {
+      "path": "0004-arm32-opt-in-larger-tlb.patch",
+      "sha256": "61c91efa4c3ba801a3b698bdf64a26a7f0c4080dcaa16e4c4a77bc59402ef767",
+      "files": [
+        "include/exec/cpu-defs.h",
+        "CMakeLists.txt"
       ]
     }
   ]
