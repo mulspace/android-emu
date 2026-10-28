@@ -134,3 +134,6 @@ For a broken fake-IP DNS/proxy route, `sync_archives.py --resolve-ip <verified-p
 changes only curl's destination for the original HTTPS hostname. Obtain the current
 IP from a trusted DNS source. Certificate verification remains enabled; this does
 not change system DNS or proxy services. Do not hard-code an old address in the lockfile.
+
+The API 24 resource-capture integration candidate and its remaining timeout limits
+are documented in [Kengent capture integration](docs/kengent-api24-capture.md).

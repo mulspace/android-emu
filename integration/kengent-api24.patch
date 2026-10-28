@@ -1,0 +1,473 @@
+--- a/src/kengent/tools/resource_node/android.py
++++ b/src/kengent/tools/resource_node/android.py
+@@ -219,6 +219,9 @@
+             process.wait(timeout=5)
+ 
+ 
++NATIVE_MIN_API = 24
++
++
+ def build_native_artifacts(*, sdk_root: Path, cache_root: Path) -> tuple[Path, Path]:
+     """Build ahead of leases. No ADB, device, user data or model is accessed."""
+     if metadata.version("uiautomator2") != "3.7.0":
+@@ -232,7 +235,8 @@
+     )
+     sources = sorted(source.parent.glob("*.java"))
+     identity = hashlib.sha256(
+-        b"".join(path.read_bytes() for path in sources) + engine.read_bytes()
++        f"resource-bridge:min-api={NATIVE_MIN_API};java=8\n".encode()
++        + b"".join(path.read_bytes() for path in sources) + engine.read_bytes()
+     ).hexdigest()
+     output = cache_root / identity
+     artifact = output / "bridge.jar"
+@@ -269,7 +273,7 @@
+             [
+                 str(d8[-1]),
+                 "--min-api",
+-                "26",
++                str(NATIVE_MIN_API),
+                 "--lib",
+                 str(android[-1]),
+                 "--output",
+@@ -437,23 +441,39 @@
+                 "Android locator no longer identifies the registered physical resource",
+             )
+ 
++    async def _artifact_digest(self, destination, size):
++        quoted = shlex.quote(destination)
++        raw = await self.shell(
++            "if command -v sha256sum >/dev/null 2>&1; then sha256sum "
++            + quoted + " 2>/dev/null || true; elif [ -f " + quoted
++            + " ]; then printf 'readback\\n'; fi",
++            timeout=5,
++        )
++        if raw.strip() == b"readback":
++            # Android 7 toybox has no sha256sum. Verify the exact bounded JAR
++            # bytes on the host, rather than weakening verification to SHA-1.
++            data = await run_bounded(
++                self.command("exec-out", "cat", destination), timeout=20, limit=size
++            )
++            return hashlib.sha256(data).hexdigest()
++        fields = raw.decode("ascii", "ignore").split()
++        return fields[0] if fields and re.fullmatch(r"[a-f0-9]{64}", fields[0]) else ""
++
+     async def prepare(self, *, include_engine=True):
+         remote = []
+         for source in self.artifacts if include_engine else self.artifacts[1:]:
+-            digest = hashlib.sha256(source.read_bytes()).hexdigest()
++            content = source.read_bytes()
++            if not 0 < len(content) <= 16 * 1024 * 1024:
++                raise ValueError("Private bridge artifact exceeds its bound")
++            digest = hashlib.sha256(content).hexdigest()
+             destination = "/data/local/tmp/kengent-resource-" + digest + ".jar"
+-            present = await self.shell(
+-                "sha256sum " + shlex.quote(destination) + " 2>/dev/null || true",
+-                timeout=5,
+-            )
+-            if present.decode("ascii", "ignore").split()[:1] != [digest]:
++            present = await self._artifact_digest(destination, len(content))
++            if present != digest:
+                 await run_bounded(
+                     self.command("push", str(source), destination), timeout=20
+                 )
+-                checked = await self.shell(
+-                    "sha256sum " + shlex.quote(destination), timeout=5
+-                )
+-                if checked.decode("ascii", "ignore").split()[:1] != [digest]:
++                checked = await self._artifact_digest(destination, len(content))
++                if checked != digest:
+                     raise ServiceFault(
+                         502,
+                         "native_artifact_mismatch",
+--- a/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
++++ b/src/kengent/tools/resource_node/native/ResourceDeviceBridge.java
+@@ -537,7 +537,16 @@
+         int currentId = 0;
+         boolean privateInput = false;
+         try {
+-            service = Class.forName("com.wetest.uia2.stub.AutomatorServiceImpl").getConstructor().newInstance();
++            // Android 7 ClipboardManager constructs a Handler on this thread.
++            // Its listeners need the running main loop, not the stdio worker.
++            android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
++            service = MainThreadInit.call(new MainThreadInit.Queue() {
++                public boolean post(Runnable task) { return mainHandler.post(task); }
++                public void remove(Runnable task) { mainHandler.removeCallbacks(task); }
++            }, () -> {
++                alive();
++                return Class.forName("com.wetest.uia2.stub.AutomatorServiceImpl").getConstructor().newInstance();
++            }, 5000);
+             // Match uiautomator2's client defaults in this lease-owned JVM.
+             // Game animations never become idle. SnapshotCapture still checks
+             // fresh foreground/rotation/sensitive fields before and after pixels.
+--- a/src/kengent/tools/resource_node/native/AppLaunch.java
++++ b/src/kengent/tools/resource_node/native/AppLaunch.java
+@@ -26,7 +26,7 @@
+                 || intent.getSelector() != null) throw new IllegalArgumentException();
+         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+ 
+-        // AOSP IActivityManager retains this exact signature from API 26 onward.
++        // AOSP IActivityManager retains this exact signature from API 24 onward.
+         // Resolve everything before the single physical start; never probe by invoking.
+         Class<?> contract = Class.forName("android.app.IActivityManager");
+         Method method = contract.getMethod("startActivityAsUser",
+@@ -35,7 +35,7 @@
+                 int.class, int.class, Class.forName("android.app.ProfilerInfo"),
+                 Bundle.class, int.class);
+         if (method.getReturnType() != int.class) throw new IllegalStateException();
+-        Object manager = Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null);
++        Object manager = ActivityManagerAccess.get();
+         if (!contract.isInstance(manager)) throw new IllegalStateException();
+         return new AppLaunch(manager, method, intent);
+     }
+--- a/src/kengent/tools/resource_node/native/AppStop.java
++++ b/src/kengent/tools/resource_node/native/AppStop.java
+@@ -27,7 +27,7 @@
+         Class<?> contract = Class.forName("android.app.IActivityManager");
+         Method method = contract.getMethod("forceStopPackage", String.class, int.class);
+         if (method.getReturnType() != void.class) throw new IllegalStateException();
+-        Object manager = Class.forName("android.app.ActivityManager").getMethod("getService").invoke(null);
++        Object manager = ActivityManagerAccess.get();
+         if (!contract.isInstance(manager)) throw new IllegalStateException();
+         return new AppStop(manager, method, packageName);
+     }
+--- /dev/null
++++ b/src/kengent/tools/resource_node/native/ActivityManagerAccess.java
+@@ -0,0 +1,18 @@
++package club.lang.resources;
++
++import android.os.Build;
++
++/** Resolve the Binder service before an action; never retry a physical action. */
++public final class ActivityManagerAccess {
++    private ActivityManagerAccess() {}
++
++    public static Object get() throws Exception {
++        if (Build.VERSION.SDK_INT < 24) throw new IllegalStateException();
++        if (Build.VERSION.SDK_INT < 26) {
++            return Class.forName("android.app.ActivityManagerNative")
++                    .getMethod("getDefault").invoke(null);
++        }
++        return Class.forName("android.app.ActivityManager")
++                .getMethod("getService").invoke(null);
++    }
++}
+--- /dev/null
++++ b/src/kengent/tools/resource_node/native/MainThreadInit.java
+@@ -0,0 +1,29 @@
++package club.lang.resources;
++
++import java.util.concurrent.Callable;
++import java.util.concurrent.FutureTask;
++import java.util.concurrent.TimeUnit;
++
++/** One bounded initialization on the Android main loop, never a physical action. */
++public final class MainThreadInit {
++    public interface Queue {
++        boolean post(Runnable task);
++        void remove(Runnable task);
++    }
++
++    private MainThreadInit() {}
++
++    public static <T> T call(Queue queue, Callable<T> initializer, long timeoutMillis) throws Exception {
++        if (timeoutMillis <= 0 || timeoutMillis > 5000) throw new IllegalArgumentException();
++        FutureTask<T> task = new FutureTask<>(initializer);
++        try {
++            if (!queue.post(task)) throw new IllegalStateException();
++            return task.get(timeoutMillis, TimeUnit.MILLISECONDS);
++        } finally {
++            // A timed-out task must not start later. An already executing
++            // constructor is not interrupted or retried; bridge shutdown owns it.
++            task.cancel(false);
++            queue.remove(task);
++        }
++    }
++}
+--- a/tests/platform_services/test_resource_app_launch.py
++++ b/tests/platform_services/test_resource_app_launch.py
+@@ -11,7 +11,7 @@
+ NATIVE = ROOT / "src/kengent/tools/resource_node/native"
+ 
+ 
+-@pytest.fixture(scope="module", params=["exact", "feature_only", "wrong_return"])
++@pytest.fixture(scope="module", params=["exact", "exact_api24", "exact_api25", "feature_only", "wrong_return"])
+ def launcher_classes(tmp_path_factory, request):
+     if not shutil.which("javac") or not shutil.which("java"):
+         pytest.skip("JDK required for native launch contract regression")
+@@ -24,7 +24,17 @@
+                   "android.os.Bundle options, int userId) throws Exception;")
+     if request.param == "wrong_return":
+         signature = signature.replace("int startActivityAsUser", "long startActivityAsUser")
++    api = 24 if request.param == "exact_api24" else 25 if request.param == "exact_api25" else 35
+     sources = {
++        "android/os/Build.java": f"package android.os; public class Build {{ public static class VERSION {{ public static final int SDK_INT = {api}; }} }}",
++        "android/app/ActivityManagerNative.java": """package android.app;
++public class ActivityManagerNative {
++    public static Object getDefault() {
++        if (android.os.Build.VERSION.SDK_INT >= 26) throw new AssertionError();
++        ActivityManager.lookups++;
++        return ActivityManager.manager;
++    }
++}""",
+         "android/os/Bundle.java": "package android.os; public class Bundle {}",
+         "android/os/IBinder.java": "package android.os; public interface IBinder {}",
+         "android/app/IApplicationThread.java": "package android.app; public interface IApplicationThread {}",
+@@ -34,7 +44,7 @@
+ public class ActivityManager {
+     public static Object manager;
+     public static int lookups;
+-    public static Object getService() { lookups++; return manager; }
++    public static Object getService() { if (android.os.Build.VERSION.SDK_INT < 26) throw new AssertionError(); lookups++; return manager; }
+ }""",
+         "android/content/ComponentName.java": """package android.content;
+ public class ComponentName {
+@@ -127,10 +137,10 @@
+         path.write_text(source)
+         paths.append(str(path))
+     subprocess.run(
+-        ["javac", "-d", str(directory), str(NATIVE / "AppLaunch.java"), *paths],
++        ["javac", "-d", str(directory), str(NATIVE / "AppLaunch.java"), str(NATIVE / "ActivityManagerAccess.java"), *paths],
+         check=True, timeout=30, capture_output=True,
+     )
+-    return directory, request.param
++    return directory, "exact" if request.param.startswith("exact") else request.param
+ 
+ 
+ def run_probe(launcher_classes, mode="normal", code=0):
+--- a/tests/platform_services/test_resource_app_stop.py
++++ b/tests/platform_services/test_resource_app_stop.py
+@@ -11,7 +11,7 @@
+ NATIVE = ROOT / "src/kengent/tools/resource_node/native"
+ 
+ 
+-@pytest.fixture(scope="module", params=["exact", "missing_method", "wrong_return"])
++@pytest.fixture(scope="module", params=["exact", "exact_api24", "exact_api25", "missing_method", "wrong_return"])
+ def stop_classes(tmp_path_factory, request):
+     if not shutil.which("javac") or not shutil.which("java"):
+         pytest.skip("JDK required for native stop regression")
+@@ -21,13 +21,23 @@
+         signature = "void forceStopPackage(String packageName) throws Exception;"
+     elif request.param == "wrong_return":
+         signature = signature.replace("void forceStopPackage", "int forceStopPackage")
++    api = 24 if request.param == "exact_api24" else 25 if request.param == "exact_api25" else 35
+     sources = {
++        "android/os/Build.java": f"package android.os; public class Build {{ public static class VERSION {{ public static final int SDK_INT = {api}; }} }}",
++        "android/app/ActivityManagerNative.java": """package android.app;
++public class ActivityManagerNative {
++    public static Object getDefault() {
++        if (android.os.Build.VERSION.SDK_INT >= 26) throw new AssertionError();
++        ActivityManager.lookups++;
++        return ActivityManager.manager;
++    }
++}""",
+         "android/app/IActivityManager.java": "package android.app; public interface IActivityManager {" + signature + "}",
+         "android/app/ActivityManager.java": """package android.app;
+ public class ActivityManager {
+     public static Object manager;
+     public static int lookups;
+-    public static Object getService() { lookups++; return manager; }
++    public static Object getService() { if (android.os.Build.VERSION.SDK_INT < 26) throw new AssertionError(); lookups++; return manager; }
+ }""",
+         "StopProbe.java": """
+ import club.lang.resources.AppStop;
+@@ -119,10 +129,10 @@
+         path.write_text(source)
+         paths.append(str(path))
+     subprocess.run(
+-        ["javac", "-d", str(directory), str(NATIVE / "AppStop.java"), *paths],
++        ["javac", "-d", str(directory), str(NATIVE / "AppStop.java"), str(NATIVE / "ActivityManagerAccess.java"), *paths],
+         capture_output=True, check=True, timeout=30,
+     )
+-    return directory, request.param
++    return directory, "exact" if request.param.startswith("exact") else request.param
+ 
+ 
+ def probe(stop_classes, mode):
+--- /dev/null
++++ b/tests/platform_services/test_resource_native_build.py
+@@ -0,0 +1,50 @@
++"""The bridge cache must not serve an old API-26 DEX to an API-24 device."""
++
++import hashlib
++from pathlib import Path
++import zipfile
++
++from kengent.tools.resource_node import android
++
++
++def test_native_build_invalidates_old_cache_and_keys_minimum_api(tmp_path, monkeypatch):
++    package = tmp_path / "package"
++    engine = tmp_path / "engine"
++    (package / "native").mkdir(parents=True)
++    (engine / "assets").mkdir(parents=True)
++    source_bytes, engine_bytes = b"class Example {}", b"engine"
++    (package / "native/ResourceDeviceBridge.java").write_bytes(source_bytes)
++    (engine / "assets/u2.jar").write_bytes(engine_bytes)
++    monkeypatch.setattr(android.metadata, "version", lambda name: "3.7.0")
++    monkeypatch.setattr(android.resources, "files", lambda name: engine if name == "uiautomator2" else package)
++    sdk = tmp_path / "sdk"
++    for name in ("build-tools/36/d8", "platforms/34/android.jar"):
++        path = sdk / name
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.touch()
++    cache = tmp_path / "cache"
++    old = cache / hashlib.sha256(source_bytes + engine_bytes).hexdigest()
++    old.mkdir(parents=True)
++    (old / "bridge.jar").write_bytes(b"incompatible-api26")
++    commands = []
++
++    def compiler(command):
++        commands.append(command)
++        if command[0] == "javac":
++            (Path(command[command.index("-d") + 1]) / "Example.class").write_bytes(b"class")
++        else:
++            minimum = command[command.index("--min-api") + 1]
++            (Path(command[command.index("--output") + 1]) / "classes.dex").write_bytes(minimum.encode())
++
++    monkeypatch.setattr(android, "_build_command", compiler)
++    _, artifact = android.build_native_artifacts(sdk_root=sdk, cache_root=cache)
++    assert artifact.parent != old and len(commands) == 2
++    assert commands[1][commands[1].index("--min-api") + 1] == "24"
++    with zipfile.ZipFile(artifact) as archive:
++        assert archive.read("classes.dex") == b"24"
++    assert android.build_native_artifacts(sdk_root=sdk, cache_root=cache)[1] == artifact
++    assert len(commands) == 2
++    monkeypatch.setattr(android, "NATIVE_MIN_API", 26)
++    _, newer = android.build_native_artifacts(sdk_root=sdk, cache_root=cache)
++    assert newer != artifact and len(commands) == 4
++    assert (old / "bridge.jar").read_bytes() == b"incompatible-api26"
+--- /dev/null
++++ b/tests/platform_services/test_resource_artifact_digest.py
+@@ -0,0 +1,61 @@
++import hashlib
++
++import pytest
++
++from kengent.contracts.service_api import ServiceFault
++from kengent.tools.resource_node import android
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("mode", ["sha256", "readback", "missing", "corrupt"])
++async def test_artifact_verification_before_launch(tmp_path, monkeypatch, mode):
++    artifact = tmp_path / "bridge.jar"
++    artifact.write_bytes(b"exact-jar-bytes")
++    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
++    transport = android.AdbTransport(adb_path="adb", serial="isolated-test", artifacts=(artifact, artifact))
++    pushes, reads = [], []
++
++    async def shell(script, *, timeout):
++        assert "command -v sha256sum" in script
++        if mode == "sha256":
++            return f"{digest}  /data/local/tmp/test.jar\n".encode()
++        if mode == "missing" and not pushes:
++            return b""
++        return b"readback\n"
++
++    async def run(command, *, timeout, limit=None):
++        assert command[:3] == ["adb", "-s", "isolated-test"]
++        if command[3] == "push":
++            pushes.append(command)
++            return b""
++        assert command[3:5] == ["exec-out", "cat"]
++        assert command[5] == "/data/local/tmp/kengent-resource-" + digest + ".jar"
++        assert limit == len(artifact.read_bytes()) and timeout == 20
++        reads.append(command)
++        return b"corrupt" if mode == "corrupt" else artifact.read_bytes()
++
++    monkeypatch.setattr(transport, "shell", shell)
++    monkeypatch.setattr(android, "run_bounded", run)
++    if mode == "corrupt":
++        with pytest.raises(ServiceFault) as caught:
++            await transport.prepare(include_engine=False)
++        assert caught.value.problem()["code"] == "native_artifact_mismatch"
++        assert len(pushes) == 1 and len(reads) == 2
++    else:
++        launch = await transport.prepare(include_engine=False)
++        assert "kengent-resource-" + digest + ".jar" in launch
++        assert len(pushes) == (1 if mode == "missing" else 0)
++        assert len(reads) == (0 if mode == "sha256" else 1)
++
++
++@pytest.mark.asyncio
++async def test_readback_failure_is_not_accepted_or_replayed(monkeypatch):
++    transport = android.AdbTransport(adb_path="adb", serial="isolated-test", artifacts=())
++    async def shell(*args, **kwargs):
++        return b"readback\n"
++    async def failure(*args, **kwargs):
++        raise TimeoutError()
++    monkeypatch.setattr(transport, "shell", shell)
++    monkeypatch.setattr(android, "run_bounded", failure)
++    with pytest.raises(TimeoutError):
++        await transport._artifact_digest("/data/local/tmp/bridge.jar", 100)
+--- /dev/null
++++ b/tests/platform_services/test_resource_main_thread_init.py
+@@ -0,0 +1,68 @@
++"""Initialization is queued once; failures never replay and queued work expires."""
++
++from pathlib import Path
++import shutil
++import subprocess
++
++import pytest
++
++
++@pytest.fixture(scope="module")
++def init_classes(tmp_path_factory):
++    if not shutil.which("javac") or not shutil.which("java"):
++        pytest.skip("JDK required")
++    root = tmp_path_factory.mktemp("main-thread-init")
++    source = root / "InitProbe.java"
++    source.write_text('''
++import club.lang.resources.MainThreadInit;
++import java.util.concurrent.*;
++public class InitProbe {
++    static void check(boolean ok) { if (!ok) throw new AssertionError(); }
++    static class Queue implements MainThreadInit.Queue {
++        final String mode;
++        Runnable queued;
++        int posts, removes, calls;
++        Thread worker;
++        Queue(String mode) { this.mode = mode; }
++        public boolean post(Runnable task) {
++            posts++; queued = task;
++            if (mode.equals("rejected")) return false;
++            if (mode.equals("timeout")) return true;
++            worker = new Thread(task, "android-main-test"); worker.start(); return true;
++        }
++        public void remove(Runnable task) { check(task == queued); removes++; }
++    }
++    public static void main(String[] args) throws Exception {
++        Queue queue = new Queue(args[0]);
++        String result;
++        try {
++            result = MainThreadInit.call(queue, () -> {
++                queue.calls++;
++                check(Thread.currentThread().getName().equals("android-main-test"));
++                if (queue.mode.equals("error")) throw new SecurityException();
++                return "ready";
++            }, 100);
++        } catch (Exception error) { result = error.getClass().getSimpleName(); }
++        if (queue.worker != null) queue.worker.join(1000);
++        check(queue.posts == 1 && queue.removes == 1);
++        queue.queued.run(); // A delayed or repeated queue callback cannot replay initialization.
++        if (queue.mode.equals("timeout") || queue.mode.equals("rejected")) check(queue.calls == 0);
++        else check(queue.calls == 1);
++        System.out.println(result + ":calls=" + queue.calls);
++    }
++}
++''')
++    native = Path(__file__).resolve().parents[2] / "src/kengent/tools/resource_node/native/MainThreadInit.java"
++    subprocess.run(["javac", "-d", str(root), str(native), str(source)], check=True, capture_output=True, timeout=30)
++    return root
++
++
++@pytest.mark.parametrize("mode,expected", [
++    ("normal", "ready:calls=1"),
++    ("error", "ExecutionException:calls=1"),
++    ("timeout", "TimeoutException:calls=0"),
++    ("rejected", "IllegalStateException:calls=0"),
++])
++def test_main_loop_init_is_bounded_and_not_replayed(init_classes, mode, expected):
++    result = subprocess.run(["java", "-cp", str(init_classes), "InitProbe", mode], capture_output=True, text=True, check=True, timeout=5)
++    assert result.stdout.strip() == expected and result.stderr == ""
