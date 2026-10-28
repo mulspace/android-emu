@@ -137,3 +137,46 @@ kill, and their exact PIDs and ports 5576/5577 were verified released. Guest dis
 and private evidence are preserved. This is controlled teardown, not a spontaneous
 engine crash. Complete authenticated funds/holdings and repeatable cold-start
 collection remain outstanding; no Stock cutover has been made.
+
+## Reboot repeat with default 30-second capture deadline
+
+A fresh owned emulator run reused the same candidate binary and latest diagnostic
+bridge. Junhong's start helper completed in 64.946 s; Android recorded 51.730 s
+for its full MainScreen display. The public journey then failed after 90.116 s
+at the first read following the market-tab action, with a transport read timeout.
+
+The numeric log shows why the default budget was exhausted: initial foreground
+and geometry checks took about 1.37 s, an absent active root cost 5.03 s, the retry
+foreground read took 13.60 s, and its 486-node traversal took 11.27 s. The bridge
+completed that traversal only just beyond the host's 30-second request limit.
+This was not evidence of a new engine crash or missing market entitlement. The
+failed read did not replay the preceding input, and session cleanup succeeded.
+Warm capture passes therefore remain insufficient for reliable default-timeout
+operation after restart. Production timeout settings remain unchanged.
+
+Tongdaxin's default-timeout repeat did not reach the daily chart either, but for
+a different reason. Its start helper took 28.275 s and the journey stopped after
+95.457 s while waiting for the chart selector. Saved read-only hierarchies show
+the search result briefly existed, the one tap was acknowledged, then the search
+WebView rebuilt its list; all eight later reads remained on the search page.
+An acknowledged injected tap is not proof that navigation completed. No second
+click was sent to compensate for this uncertain outcome.
+
+The isolated journey now requires the exact public stock hit (including bounds)
+to match across two consecutive read-only observations, using the latest frame
+for its single tap. An incomplete read resets that stability requirement; unknown
+pages, transport timeouts and sensitivity/foreground failures are not relaxed.
+
+
+The stable-result follow-up passed after a fresh emulator boot with the default
+30-second per-snapshot deadline. The App display helper took 26.760 s, followed
+by a 124.937 s complete public journey including bridge setup/cleanup. Four
+read-only result observations were needed before two matched; the one result tap
+then reached the daily chart. All three checked image pairs passed in 5.630,
+4.056 and 3.875 s. Visual review confirmed 招商证券 / 600999, 日K and latest chart
+date 2026/10/28. The test was before the next market session; it does not establish
+live intraday freshness, repeated cold-start reliability or account acceptance.
+
+All 47 repository tests passed. The native session acknowledged cleanup. The
+owned emulator was explicitly stopped (runner exit -10 after 464.09 s), with its
+exact PID absent and ports 5576/5577 released. P30 and production remained untouched.

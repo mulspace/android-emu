@@ -81,7 +81,8 @@ class Journey:
     def __init__(self, package, capture, action, pause=asyncio.sleep):
         self.package, self.capture, self.action, self.pause = package, capture, action, pause
 
-    async def wait(self, phase, selector):
+    async def wait(self, phase, selector, *, stable=False):
+        previous = None
         for attempt in range(8):
             try:
                 frame = await self.capture(f"{phase}_{attempt+1}", {"include_image": False, "include_xml": True})
@@ -93,11 +94,13 @@ class Journey:
                     raise
                 if attempt == 7:
                     raise
+                previous = None
                 await self.pause(2)
                 continue
             chosen = selector(nodes(frame, self.package))
-            if chosen is not None:
+            if chosen is not None and (not stable or chosen == previous):
                 return frame, chosen
+            previous = chosen
             if attempt < 7:
                 await self.pause(2)
         raise TimeoutError("Public page did not reach the expected state: " + phase)
@@ -137,7 +140,9 @@ class Journey:
             await self.tap("submit_public_search_once", frame, chosen)
             frame, chosen = await self.wait("exact_result", lambda ns: unique(ns, lambda n:
                 n.get("content-desc", "").startswith("招商证券\n")
-                and "600999" in n.get("content-desc", "").splitlines() and n.get("clickable") == "true"))
+                and "600999" in n.get("content-desc", "").splitlines() and n.get("clickable") == "true"), stable=True)
+            # Search WebView can briefly expose a hit, then rebuild its results.
+            # Require two matching read-only hit observations before the one tap.
             await self.tap("open_exact_result_once", frame, chosen)
             frame, chosen = await self.wait("chart_ready", daily)
             await self.tap("select_daily_once", frame, chosen)

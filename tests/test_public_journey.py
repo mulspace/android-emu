@@ -39,7 +39,7 @@ def sequence(notice=False):
     ready = frame(chart())
     daily_frame = frame(chart() + ([node(text="公开行情公告", bounds="[49,387][671,446]"),
         node(**{"class": "android.widget.LinearLayout", "bounds": "[671,387][701,446]"})] if notice else []))
-    return [market, search, typed, result, ready, daily_frame] + ([ready] if notice else [])
+    return [market, search, typed, result, deepcopy(result), ready, daily_frame] + ([ready] if notice else [])
 
 
 class Selectors(unittest.TestCase):
@@ -123,7 +123,9 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
             if phase == failed_action:
                 raise TimeoutError("Uncertain action")
         try:
-            await Journey(TDX, capture, action).navigate()
+            async def pause(seconds):
+                pass
+            await Journey(TDX, capture, action, pause).navigate()
         except (TimeoutError, ValueError):
             if failed_action is None and not changed_pair:
                 raise
@@ -159,6 +161,20 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
             await Journey(TDX, capture, action, pause).navigate()
         self.assertEqual(len(calls), 8)
         self.assertEqual(pauses, [2] * 7)
+
+    async def test_stable_control_requires_consecutive_matches_and_returns_latest_frame(self):
+        pending = [frame([node(text="日K", bounds=b)] + [node(text="分时"), node(text="周K"), node(text="月K")])
+                   for b in ("[0,0][10,10]", "[10,10][20,20]", "[10,10][20,20]")]
+        for i, value in enumerate(pending): value["frame_ref"] = str(i)
+        calls = []
+        async def capture(phase, options):
+            calls.append(phase); return pending.pop(0)
+        async def action(*args): self.fail("Readiness must not click")
+        async def pause(seconds): pass
+        result, chosen = await Journey(TDX,capture,action,pause).wait("stable",daily,stable=True)
+        self.assertEqual(result["frame_ref"], "2")
+        self.assertEqual(chosen["bounds"], "[10,10][20,20]")
+        self.assertEqual(len(calls),3)
 
     async def test_transient_incomplete_read_retries_without_input(self):
         class Missing(Exception):
