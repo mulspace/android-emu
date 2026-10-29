@@ -66,17 +66,20 @@ async def probe(args):
     owned_run(args.run_dir, args.serial)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     events = []
-    receipt = {"public_only": True, "production_cutover": False, "account_input": False,
+    receipt = {"started_at": datetime.now(UTC).isoformat(),
+               "public_only": True, "production_cutover": False, "account_input": False,
                "package": args.package, "timing_profile": "arm-emulator", "events": events,
+               "duration_limit_seconds": args.seconds,
                "checked_capture": args.checked}
     session = None
     started = time.monotonic()
     phase = "identify"
     def event(value):
+        value["observed_at"] = datetime.now(UTC).isoformat()
         events.append(value)
         print(json.dumps(value), flush=True)
     try:
-        async with asyncio.timeout(240):
+        async with asyncio.timeout(args.seconds):
             transport = AdbTransport(adb_path=str(args.adb), serial=args.serial,
                 artifacts=(args.artifacts / "u2.jar", args.artifacts / "bridge.jar"),
                 timing_profile="arm-emulator")
@@ -85,7 +88,7 @@ async def probe(args):
                 raise ValueError("Requested public App is not installed")
             transport.fingerprint = identity["fingerprint"]
             context = {"nonce": uuid.uuid4().hex,
-                "expires_at": (datetime.now(UTC) + timedelta(seconds=280)).isoformat()}
+                "expires_at": (datetime.now(UTC) + timedelta(seconds=min(280, args.seconds + 40))).isoformat()}
             receipt["nonce"] = context["nonce"]
             phase = "native_start"
             traced = traced_session_type(NativeSession, event)
@@ -141,6 +144,7 @@ async def probe(args):
                 receipt["cleanup_confirmed"] = False
                 receipt["cleanup_error_type"] = type(error).__name__
         receipt["elapsed_seconds"] = round(time.monotonic() - started, 3)
+        receipt["ended_at"] = datetime.now(UTC).isoformat()
         receipt["passed"] = (len([e for e in events if e["phase"].startswith("snapshot_") and e["ok"]]) == args.count * (2 if args.checked else 1)
                              and receipt.get("cleanup_confirmed") is True)
         (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
@@ -159,6 +163,8 @@ def main():
     parser.add_argument("--serial", default="emulator-5576")
     parser.add_argument("--package", choices=("com.tdx.AndroidNew", "com.guotai.dazhihui"), required=True)
     parser.add_argument("--count", type=int, choices=range(1, 7), default=3)
+    parser.add_argument("--seconds", type=int, choices=(60, 120, 240), default=240,
+                        help="Bound this read-only diagnostic before the emulator outer deadline")
     parser.add_argument("--checked", action="store_true", help="Observe XML then capture the exact same frame, as Stock does")
     args = parser.parse_args()
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))

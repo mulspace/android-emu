@@ -188,12 +188,15 @@ are documented in [Kengent capture integration](docs/kengent-api24-capture.md).
 
 Use [the bounded public journey probe](docs/public-journey-validation.md) to test
 launch, deterministic navigation and three strictly bound screenshots together.
-Recent isolated runs passed TDX daily-chart capture and Junhong public quote
-capture with the optional prefetch candidate. Junhong startup still failed when
-TDX remained busy in the background; the explicit peer-isolation comparison is
-recorded below. These pre-open public tests do not establish live-market or
-complete-account readiness. Account collection requires the managed Stock App
-and trusted account Context; production Stock bindings remain unchanged.
+Isolated pre-open runs passed TDX daily-chart and Junhong public quote capture
+with the optional prefetch candidate. At market open, Junhong also returned three
+fresh screenshots with changing quotes, but the strict previous-frame Stock
+capture failed as the page changed; fresh pixels and later XML are not an atomic
+observation. Cold startup can still ANR even after the other App was stopped.
+The optional isolation helper now verifies that Android did not restore that
+peer. These results do not establish stable end-to-end or complete-account
+readiness. Account collection requires the managed Stock App and trusted account
+Context; production Stock bindings remain unchanged.
 
 See [snapshot diagnostics and the single-pass experiment](docs/snapshot-observation-diagnostics.md)
 for reproducible no-GDB comparisons, numeric observation timing and the

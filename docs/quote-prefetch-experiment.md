@@ -197,3 +197,108 @@ managed device binding. The desktop's authenticated ingress was rechecked and
 still returned HTTP 401; no managed App tool is available here. Broker-login
 permission is retained, but it does not supply that missing authenticated
 platform Context. Do not switch Stock tasks based only on these public tests.
+
+
+## Market-open follow-up and verified peer stopping
+
+A 2026-10-29 run booted at 09:20:08 +08:00 on the same two-vCPU candidate,
+with host CPUs 14/15 and a 1800-second outer limit. The first Junhong startup
+failed after 56.851 seconds: `AppwidgetUpdateService` ANR at 09:22:33.
+TDX had been explicitly stopped. Thus the previous passing peer-isolation run
+was not a complete cold-start fix. The retained trace file contained system
+processes but not the Junhong main-process section. A bounded request for a new
+main-process stack returned a nonzero exit; its cause was not established,
+and no privilege/security change was made to obtain it. Do not attribute a different run's main stack to this failure.
+
+One comparison launch after the guest had settled passed its Activity display
+gate in 70.087 seconds. This is a successful retry, not evidence that the first
+failure disappeared. Full public search and exact result navigation then reached
+600999. The first bound image failed after 7.652 seconds at 09:29:05: the numeric
+difference report identified exactly one changed clock node as 09:28 became
+09:29. The whole navigation probe failed in 131.984 seconds and cleaned up.
+No screenshot from that failed image request was accepted.
+
+A new read-only session on the open quote page tested the original 30-second
+snapshot deadline after market open. Quote entry took 8.982 seconds and the XML
+observation 8.927 seconds; the image request failed after 7.940 seconds because
+the observed page changed before capture. This time it was not a clock-only
+change: the hierarchy differed structurally, with 129 changed nodes. The whole
+probe failed in 69.502 seconds and cleaned up. Increasing the timeout would not
+address this observed mismatch.
+
+For comparison, the existing fresh, read-only screenshot interface was tested
+without binding to an earlier observation. No native guard or App was changed;
+foreground, geometry and full sensitive-input checks before/after the image
+remained active. Three screenshots passed in 19.481, 11.728 and 16.716 seconds
+(85.823 seconds including setup/cleanup). All three original receipts passed
+backend format validation offline. The first and last images visually showed
+600999 / 招商证券 with changing prices, cumulative volume and order-book rows.
+This is stronger public-market evidence than the earlier empty pre-open page,
+but the screen alone does not establish the vendor's quote-delay guarantee.
+
+**Fresh screenshot mode is not the previous-frame Stock acceptance test.** In
+this mode the returned XML is read after the pixels. One retained image showed
+volume 3.70万 while the XML reported 3.76万. These are different observation
+instants; do not merge their values into an allegedly atomic account/quote
+snapshot. The strict Stock-style tests remain failed, and no production route
+was changed to bypass them. Diagnostic receipts now carry UTC start/end and
+per-operation observation times; elapsed durations still use a monotonic clock.
+
+The App-switch test found a separate flaw in the isolation evidence: after a
+successful `am force-stop`, Android restored Junhong's SearchActivity process
+before TDX started. Merely recording the stop command did not prove the peer
+remained absent. The optional `--stop-other-test-app` helper now reads the exact
+package and subprocess identities after the target's main display event. It may
+stop a restored peer once, then requires two absent-process checks; another
+restoration fails the experiment instead of starting a restart loop. Malformed
+or unavailable process inventories fail closed. It rechecks target ANRs/crashes
+before reporting success. This remains opt-in on the owned diagnostic AVD.
+
+Seventy repository tests pass, covering similar package-name rejection,
+subprocesses, malformed inventories, one corrective stop, repeated restoration
+and an already-absent peer. Earlier peer-isolation results establish an explicit
+stop operation, not continuous absence without this additional evidence.
+
+
+The first TDX start reported its Activity displayed after 40.284 seconds, but
+actual inspection still showed the splash screen. Two bounded navigation checks
+failed without any input (45.530 and 44.173 seconds, both cleaned up). Removing
+the restored Junhong process alone did not make that TDX instance ready.
+A single TDX restart with the new helper passed the display and two absent-peer
+checks in 29.301 seconds. The next route reached the exact stock result, but its
+first chart read exceeded 30 seconds; that probe failed in 106.238 seconds and
+cleaned up. These failures are retained rather than overwritten by later results.
+
+An explicit `--tdx-page quote` diagnostic route now resumes from the already
+opened public chart, requires its known tab layout, and selects 日K once. It
+never repeats the earlier search, symbol entry or result tap. This route cannot
+be used with Junhong, and a failed read ends the session without input. All
+seventy-one repository tests pass, including this bounded continuation behavior.
+
+
+The current-chart continuation reached 日K, but its strict bound image failed
+on a during-capture content change after 3.554 seconds (60.225 seconds total,
+cleanup confirmed). No old-frame acceptance rule was relaxed. A separate test
+of the existing fresh screenshot API then captured three 日K images in 10.906,
+5.316 and 2.656 seconds; the complete bounded probe passed in 51.729 seconds.
+Its image visibly showed 600999 / 招商证券, 日K, the chart date 2026/10/29, and
+nonzero current-day prices and volume. All three original receipts passed
+backend validation offline. This has the same non-atomic image/XML limitation
+as the fresh Junhong result above, and does not repair the strict Stock path.
+The standalone capture probe now also supports explicit 60/120-second diagnostic
+budgets (default 240), permitting cleanup before the owning emulator deadline.
+
+All eight native collection sessions confirmed cleanup, including failed ones.
+The final event buffer contained the one Junhong startup ANR at 09:22:33; the
+crash buffer was empty. The runner ended on explicit owned stop after 1761.43
+seconds with exit -10, before its original 1800-second limit. Its PID was absent
+and ports 5576/5577 were free. P30, production services, account credentials,
+Stock bindings and live Scheduler were not operated or changed. The final
+managed ingress check still returned 401; authenticated funds/complete-holdings
+acceptance remains unavailable. No device cutover has occurred.
+
+Next acceptance work must keep these separate: repeatable cold startup,
+read-only changing-quote collection semantics, unchanged guarded input actions,
+and authenticated complete account collection. The earlier static/pre-open
+passes and the new fresh screenshot passes must not be relabeled as end-to-end
+Stock acceptance. Raw screenshots/logs remain private and are not Git content.

@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
-from prewarm_public_app import launch_component,displayed_lines,failure_lines,wait_main_displayed,AppStartupFailure
+from prewarm_public_app import launch_component,displayed_lines,failure_lines,wait_main_displayed,AppStartupFailure,app_processes,verify_stopped_peer
 
 class Prewarm(unittest.TestCase):
     def test_launcher_requires_unique_exact_package(self):
@@ -50,5 +50,42 @@ class Prewarm(unittest.TestCase):
             wait_main_displayed(lambda:old+"\n"+new+"\n"+shown,old,package,240,lambda:0,lambda _:None)
         self.assertEqual(caught.exception.events,{new})
         self.assertEqual(wait_main_displayed(lambda:old+"\n"+shown,old,package,240,lambda:0,lambda _:None),{shown})
+
+class PeerIsolation(unittest.TestCase):
+    header="USER PID PPID VSIZE RSS WCHAN PC NAME\n"
+    base=header+"root 1 0 100 10 epoll 0 S /init\n"
+    package="com.guotai.dazhihui"
+
+    def test_exact_package_and_subprocess_not_similar_name(self):
+        output=self.base+"u0_a61 20 1 100 10 epoll 0 S "+self.package+"\n"
+        output+="u0_a61 21 1 100 10 epoll 0 S "+self.package+":pushservice\n"
+        output+="u0_a61 22 1 100 10 epoll 0 S "+self.package+"Other\n"
+        self.assertEqual(app_processes(output,self.package),{20,21})
+        for bad in ("",self.header,"permission denied",self.base+"malformed\n"):
+            with self.assertRaises(ValueError):app_processes(bad,self.package)
+        with self.assertRaises(ValueError):app_processes(output,"other.app")
+
+    def test_restore_after_initial_stop_is_corrected_once_and_verified_twice(self):
+        restored=self.base+"u0_a61 20 1 100 10 epoll 0 S "+self.package+"\n"
+        readings=iter([restored,self.base,self.base]);stops=[];pauses=[]
+        result=verify_stopped_peer(lambda:next(readings),stops.append,self.package,pauses.append)
+        self.assertEqual(stops,[self.package]);self.assertEqual(pauses,[1,1])
+        self.assertEqual(result,{"observed_process_count":1,"restop_requested":True,"verified_absent_checks":2})
+
+    def test_persistent_or_later_restore_fails_without_another_stop(self):
+        restored=self.base+"u0_a61 20 1 100 10 epoll 0 S "+self.package+"\n"
+        for values,expected in (([restored,restored],[self.package]),([self.base,self.base,restored],[])):
+            with self.subTest(values=values):
+                readings=iter(values);stops=[]
+                with self.assertRaises(RuntimeError):
+                    verify_stopped_peer(lambda:next(readings),stops.append,self.package,lambda _:None)
+                self.assertEqual(stops,expected)
+
+    def test_already_absent_peer_is_not_stopped_again(self):
+        stops=[];reads=[]
+        def read():reads.append(1);return self.base
+        result=verify_stopped_peer(read,stops.append,self.package,lambda _:None)
+        self.assertFalse(stops);self.assertEqual(len(reads),3)
+        self.assertFalse(result['restop_requested'])
 
 if __name__=='__main__':unittest.main()

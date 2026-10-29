@@ -115,9 +115,12 @@ def broker_quote_ready(items):
 
 
 class Journey:
-    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market"):
+    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market", tdx_page="market"):
         self.package, self.capture, self.action, self.pause = package, capture, action, pause
         self.junhong_page = junhong_page
+        self.tdx_page = tdx_page
+        if tdx_page not in ("market", "quote") or (tdx_page != "market" and package != TDX):
+            raise ValueError("Invalid TDX public route")
         if junhong_page not in ("market", "search", "result", "quote", "search-quote") or (junhong_page != "market" and package != JUNHONG):
             raise ValueError("Invalid Junhong public route")
 
@@ -197,24 +200,25 @@ class Journey:
                     await self.tap("open_broker_quote_once", frame, chosen)
                     await self.quote_entry()
         elif self.package == TDX:
-            frame, chosen = await self.wait("market_ready", tdx_search)
-            await self.tap("open_search_once", frame, chosen)
-            frame, _ = await self.wait("search_ready", search_field)
-            await self.action("enter_public_symbol_once", "android.text",
-                              {"frame_ref": frame["frame_ref"], "text": "600999"})
-            def submit(ns):
-                field = search_field(ns)
-                if field is None or field.get("text") != "600999":
-                    return None
-                return unique(ns, lambda n: n.get("text") == "搜索" and n.get("clickable") == "true")
-            frame, chosen = await self.wait("symbol_readback", submit)
-            await self.tap("submit_public_search_once", frame, chosen)
-            frame, chosen = await self.wait("exact_result", lambda ns: unique(ns, lambda n:
-                n.get("content-desc", "").startswith("招商证券\n")
-                and "600999" in n.get("content-desc", "").splitlines() and n.get("clickable") == "true"), stable=True)
-            # Search WebView can briefly expose a hit, then rebuild its results.
-            # Require two matching read-only hit observations before the one tap.
-            await self.tap("open_exact_result_once", frame, chosen)
+            if self.tdx_page == "market":
+                frame, chosen = await self.wait("market_ready", tdx_search)
+                await self.tap("open_search_once", frame, chosen)
+                frame, _ = await self.wait("search_ready", search_field)
+                await self.action("enter_public_symbol_once", "android.text",
+                                  {"frame_ref": frame["frame_ref"], "text": "600999"})
+                def submit(ns):
+                    field = search_field(ns)
+                    if field is None or field.get("text") != "600999":
+                        return None
+                    return unique(ns, lambda n: n.get("text") == "搜索" and n.get("clickable") == "true")
+                frame, chosen = await self.wait("symbol_readback", submit)
+                await self.tap("submit_public_search_once", frame, chosen)
+                frame, chosen = await self.wait("exact_result", lambda ns: unique(ns, lambda n:
+                    n.get("content-desc", "").startswith("招商证券\n")
+                    and "600999" in n.get("content-desc", "").splitlines() and n.get("clickable") == "true"), stable=True)
+                # Search WebView can briefly expose a hit, then rebuild its results.
+                # Require two matching read-only hit observations before the one tap.
+                await self.tap("open_exact_result_once", frame, chosen)
             frame, chosen = await self.wait("chart_ready", daily)
             await self.tap("select_daily_once", frame, chosen)
             frame, _ = await self.wait("daily_ready", daily)
@@ -240,17 +244,19 @@ async def probe(args):
     owned_run(args.run_dir, args.serial)
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     events = []
-    receipt = {"public_only": True, "production_cutover": False, "account_input": False,
+    receipt = {"started_at": datetime.now(UTC).isoformat(),
+               "public_only": True, "production_cutover": False, "account_input": False,
                "account_collection_verified": False, "package": args.package,
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
                "duration_limit_seconds": args.seconds,
                "checked_capture": True, "events": events, "visual_review_required": True,
                "launch_mode": "prestarted" if args.prestarted else "native",
-               "public_page": "broker_" + args.junhong_page if args.package == JUNHONG else "tdx_daily_chart"}
+               "public_page": "broker_" + args.junhong_page if args.package == JUNHONG else "tdx_" + args.tdx_page + "_to_daily_chart"}
     session, passed, phase = None, False, "identify"
     started = time.monotonic()
     deadline = datetime.now(UTC) + timedelta(seconds=args.seconds)
     def event(**value):
+        value["observed_at"] = datetime.now(UTC).isoformat()
         events.append(value)
         print(json.dumps(value), flush=True)
     try:
@@ -305,7 +311,7 @@ async def probe(args):
                 return raw
             if not args.prestarted:
                 await call("launch_app_once", "android.start_app", {"package": args.package})
-            await Journey(args.package, capture, call, junhong_page=args.junhong_page).navigate()
+            await Journey(args.package, capture, call, junhong_page=args.junhong_page, tdx_page=args.tdx_page).navigate()
             passed = True
     except BaseException as error:
         event(phase=phase, ok=False, type=type(error).__name__,
@@ -320,6 +326,7 @@ async def probe(args):
                 receipt["cleanup_error_type"] = type(error).__name__
         receipt["passed"] = passed and receipt.get("cleanup_confirmed") is True
         receipt["elapsed_seconds"] = round(time.monotonic()-started, 3)
+        receipt["ended_at"] = datetime.now(UTC).isoformat()
         (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print(json.dumps({k:receipt[k] for k in ("passed", "elapsed_seconds", "account_collection_verified")}), flush=True)
     return receipt["passed"]
@@ -332,6 +339,7 @@ def main():
     parser.add_argument("--serial", choices=("emulator-5576",), default="emulator-5576")
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
     parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote", "search-quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, current quote, or complete search-quote")
+    parser.add_argument("--tdx-page", choices=("market", "quote"), default="market", help="Start from the market page or a previously verified open public quote; never repeat uncertain navigation")
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")
@@ -340,6 +348,8 @@ def main():
     args = parser.parse_args()
     if args.junhong_page != "market" and args.package != JUNHONG:
         parser.error("Junhong public routes require Junhong")
+    if args.tdx_page != "market" and args.package != TDX:
+        parser.error("TDX public routes require TDX")
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))
     os.umask(0o077)
     async def run():

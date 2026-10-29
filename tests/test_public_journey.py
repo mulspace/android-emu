@@ -236,6 +236,28 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
         await Journey(JUNHONG,capture,action,junhong_page="quote").navigate()
         self.assertEqual(actions,["cancel_known_quote_layout_once"])
 
+    async def test_tdx_existing_quote_never_replays_search_or_result_tap(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed):
+                actions=[];reads=[]
+                async def capture(phase,options):
+                    reads.append(phase)
+                    if failed:raise TimeoutError("read failed")
+                    value=frame(chart())
+                    if "expected_frame_ref" in options:value["based_on_frame_ref"]=options["expected_frame_ref"]
+                    return value
+                async def action(phase,op,options):actions.append(phase)
+                journey=Journey(TDX,capture,action,tdx_page="quote")
+                if failed:
+                    with self.assertRaises(TimeoutError):await journey.navigate()
+                    self.assertEqual(actions,[]);self.assertEqual(reads,["chart_ready_1"])
+                else:
+                    await journey.navigate()
+                    self.assertEqual(actions,["select_daily_once"])
+                    self.assertEqual(sum(r.endswith("_checked") for r in reads),3)
+                with self.assertRaises(ValueError):Journey(JUNHONG,capture,action,tdx_page="quote")
+                with self.assertRaises(ValueError):Journey(TDX,capture,action,tdx_page="unknown")
+
     async def scenario(self, *, notice=False, failed_action=None, changed_pair=False):
         pending, actions, reads = sequence(notice), [], []
         last = frame(chart())
