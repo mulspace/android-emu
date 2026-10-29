@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """One isolated public App launch before UiAutomation; no account operations."""
 import argparse
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import re
 import subprocess
 import time
 from probe_public_capture import owned_run
+from startup_anr_evidence import collect as collect_anr_evidence
 
 ACTIVITIES = {'com.tdx.AndroidNew': 'com.tdx.AndroidNew/com.tdx.Android.TdxActivity',
               'com.guotai.dazhihui': 'com.guotai.dazhihui/com.gtja.home.MainScreen'}
@@ -96,8 +98,11 @@ def main():
     p.add_argument('--adb', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--package', choices=tuple(ACTIVITIES), required=True)
+    p.add_argument('--collect-anr-evidence', action='store_true', help='Read current unprivileged ANR traces immediately after a failed Junhong startup; never retries the launch')
     p.add_argument('--stop-other-test-app', action='store_true', help='Isolated AVD only: stop the other one of the two public test Apps before launch')
     args = p.parse_args()
+    if args.collect_anr_evidence and args.package != "com.guotai.dazhihui":
+        p.error("ANR evidence mode requires the explicit Junhong test")
     os.umask(0o077)
     owned_run(args.run_dir, 'emulator-5576')
     args.output.mkdir(parents=True, exist_ok=False)
@@ -162,11 +167,15 @@ def main():
         events.append({'phase': phase, 'error_type': type(error).__name__})
         if isinstance(error,AppStartupFailure):
             (args.output/'failure-events.txt').write_text('\n'.join(sorted(error.events))+'\n')
+            if args.collect_anr_evidence:
+                collect_anr_evidence(call,args.output,error.events,datetime.now().year)
+                event('anr_evidence_retained')
     result = {'passed': passed, 'package': args.package, 'events': events,
               'stopped_other_test_apps':stopped_peers, 'peer_stop_checks':peer_checks,
               'startup_limit_seconds':240,
               'elapsed_seconds': round(time.monotonic()-started,3),
               'account_input': False, 'production_cutover': False,
+              'anr_evidence_requested':args.collect_anr_evidence,
               'meaning': 'Activity displayed only; guarded capture still required'}
     (args.output/'receipt.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result),flush=True)

@@ -19,7 +19,10 @@ now passes three Junhong quote captures and rejects input authority, but cold
 startup and production Stock acceptance remain unfinished. See also the
 [TDX transition comparison](docs/tdx-window-transition.md): three public day-K
 journeys and nine bound images passed, while the optional wait showed no
-repeatable speedup. Earlier evidence is in the
+repeatable speedup. The latest
+[exact ANR evidence and official home-page experiment](docs/startup-anr-evidence.md)
+records a cold Quotes-home start and three passing bound images; complete account
+acceptance is still missing. Earlier evidence is in the
 [readiness investigation](docs/native-ready-window.md) and
 [public-page results](docs/public-journey-validation.md).
 
