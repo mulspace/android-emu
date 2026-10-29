@@ -140,6 +140,38 @@ def recover_stable_child(source):
         source=source.replace(old,new)
     return source
 
+def parallel_children(source):
+    """Two complete sibling reads; release speculative nodes on every exit."""
+    replacements = [
+        ("final AccessibilityNodeInfo node; final int width,height;",
+         "final AccessibilityNodeInfo node; final int width,height; final ParallelChildren parallel;\n        AccessibilityNodeInfo buffered; int bufferedIndex=-1;"),
+        ("Node(AccessibilityNodeInfo node,int w,int h){this.node=node;width=w;height=h;}",
+         "Node(AccessibilityNodeInfo node,int w,int h,ParallelChildren parallel){this.node=node;width=w;height=h;this.parallel=parallel;}"),
+        ("AccessibilityNodeInfo child=SiblingPrefetch.child(node,index);", """AccessibilityNodeInfo child;
+            if(bufferedIndex>=0) {
+                if(bufferedIndex!=index)throw new IllegalStateException("Unexpected diagnostic child order");
+                child=buffered;buffered=null;bufferedIndex=-1;
+            } else if(index+1<node.getChildCount()) {
+                BoundedPairReader.Pair<AccessibilityNodeInfo> pair=parallel.read(node,index);
+                child=pair.first;buffered=pair.second;bufferedIndex=index+1;
+            } else child=SiblingPrefetch.child(node,index);"""),
+        ("return new Node(child,width,height);","return new Node(child,width,height,parallel);"),
+        ("public void recycle(){node.recycle();}","public void recycle(){if(buffered!=null){buffered.recycle();buffered=null;}node.recycle();}"),
+        ("Timing timing=new Timing(), previous=TIMING.get();",
+         "Timing timing=new Timing(), previous=TIMING.get();\n        ParallelChildren parallel=new ParallelChildren();\n        List<Node> rootNodes=new ArrayList<>();"),
+        ("for(AccessibilityNodeInfo root:owned)roots.add(new Node(root,width,height));",
+         "for(AccessibilityNodeInfo root:owned){Node wrapped=new Node(root,width,height,parallel);rootNodes.add(wrapped);roots.add(wrapped);}"),
+        ("for(AccessibilityNodeInfo root:owned)root.recycle();", """// Root wrappers own any unread prefetched sibling, including early failures.
+                for(Node root:rootNodes){owned.remove(root.node);root.recycle();}
+                for(AccessibilityNodeInfo root:owned)root.recycle();"""),
+        ("timing.report();","try { parallel.close(); } finally { timing.report(); }"),
+    ]
+    for old,new in replacements:
+        if source.count(old)!=1:
+            raise ValueError("Parallel child source anchor changed")
+        source=source.replace(old,new)
+    return source
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kengent-root", type=Path, required=True)
@@ -147,6 +179,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--single-pass", action="store_true", help="Experimental complete tree/sensitivity traversal; not a production build")
     parser.add_argument("--prefetch-siblings", action="store_true", help="API-24 diagnostic: framework sibling prefetch, preserving complete traversal")
+    parser.add_argument("--parallel-children", action="store_true", help="API-24 diagnostic: two sibling reads in parallel; requires single-pass and sibling prefetch")
     parser.add_argument("--recover-stable-child", action="store_true", help="Diagnostic: one missing-child read after an identical parent refresh; requires single-pass")
     parser.add_argument("--retry-incomplete-checked", action="store_true", help="Diagnostic: retry missing nodes at most three times without changing the expected frame")
     parser.add_argument("--hierarchy-retry-delay-ms", type=int, choices=(25, 250, 1000), default=25,
@@ -157,6 +190,8 @@ def main():
         parser.error("--recover-stable-child requires --single-pass")
     if args.prefetch_siblings and not args.single_pass:
         parser.error("--prefetch-siblings requires --single-pass")
+    if args.parallel_children and (not args.single_pass or not args.prefetch_siblings or args.recover_stable_child):
+        parser.error("--parallel-children requires --single-pass --prefetch-siblings and excludes child recovery")
     os.umask(0o077)
     args.output.mkdir(parents=True, exist_ok=False)
     sys.path.insert(0, str(args.kengent_root / "src"))
@@ -192,6 +227,11 @@ def main():
             raise ValueError("Sibling prefetch source anchor changed")
         hierarchy.write_text(body.replace("node.getChild(index)","SiblingPrefetch.child(node,index)"))
         shutil.copyfile(args.experimental_source / "SiblingPrefetch.java",copied / "SiblingPrefetch.java")
+    if args.parallel_children:
+        hierarchy=copied / "AndroidHierarchy.java"
+        hierarchy.write_text(parallel_children(hierarchy.read_text()))
+        for name in ("BoundedPairReader.java", "ParallelChildren.java"):
+            shutil.copyfile(args.experimental_source / name,copied / name)
     if args.retry_incomplete_checked:
         checks = copied / "SnapshotCapture.java"
         checks.write_text(retry_incomplete_checked(checks.read_text()))
@@ -215,6 +255,7 @@ def main():
                "experimental_checked_retry": args.retry_incomplete_checked,
                "numeric_hierarchy_timing": args.single_pass,
                "experimental_sibling_prefetch": args.prefetch_siblings,
+               "experimental_parallel_children": args.parallel_children,
                "experimental_stable_child_recovery": args.recover_stable_child,
                "hierarchy_retry_delay_ms": args.hierarchy_retry_delay_ms, "numeric_mismatch_diagnostics": True, "numeric_startup_diagnostics": True, "source_hashes": before,
                "built_source_hashes": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in copied.glob("*.java")},

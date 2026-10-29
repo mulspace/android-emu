@@ -2,7 +2,7 @@ from pathlib import Path
 import sys
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from build_observation_probe import retry_incomplete_checked, hierarchy_retry_delay, mismatch_diagnostics
+from build_observation_probe import retry_incomplete_checked, hierarchy_retry_delay, mismatch_diagnostics, parallel_children
 
 class CheckedBuild(unittest.TestCase):
     def test_rejects_source_drift_or_ambiguous_transformation(self):
@@ -25,3 +25,15 @@ class CheckedBuild(unittest.TestCase):
     def test_mismatch_diagnostics_reject_missing_or_ambiguous_source(self):
         for source in ("", "        public final String phase;\n        Mismatch(" * 2):
             with self.assertRaises(ValueError): mismatch_diagnostics(source)
+
+    def test_parallel_children_keeps_full_walk_and_releases_root_buffers(self):
+        root=Path(__file__).resolve().parents[1]
+        source=(root/"experimental/native/AndroidHierarchy.java").read_text().replace("node.getChild(index)","SiblingPrefetch.child(node,index)")
+        result=parallel_children(source)
+        self.assertIn("SinglePassHierarchy.capture(roots,rotation,check)",result)
+        self.assertIn("parallel.read(node,index)",result)
+        self.assertIn("if(buffered!=null){buffered.recycle();buffered=null;}",result)
+        self.assertIn("owned.remove(root.node);root.recycle();",result)
+        self.assertIn("parallel.close()",result)
+        for value in ("",source.replace("return new Node(child,width,height);",""),result):
+            with self.assertRaises(ValueError):parallel_children(value)

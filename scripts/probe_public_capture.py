@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from datetime import UTC, datetime, timedelta
 import json
+import hashlib
 import os
 from pathlib import Path
 import signal
@@ -70,7 +71,9 @@ async def probe(args):
                "public_only": True, "production_cutover": False, "account_input": False,
                "package": args.package, "timing_profile": "arm-emulator", "events": events,
                "duration_limit_seconds": args.seconds,
-               "checked_capture": args.checked}
+               "checked_capture": args.checked,
+               "artifact_sha256": {name: hashlib.sha256((args.artifacts / name).read_bytes()).hexdigest()
+                                   for name in ("u2.jar", "bridge.jar")}}
     session = None
     started = time.monotonic()
     phase = "identify"

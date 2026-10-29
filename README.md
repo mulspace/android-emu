@@ -206,3 +206,20 @@ production capture or account authorization change.
 See [the quote traversal experiment](docs/quote-prefetch-experiment.md) for the
 measured child-lookup bottleneck and the opt-in API-24 sibling-prefetch candidate.
 It preserves full traversal and snapshot guards; it is not a production default.
+
+See [the bounded parallel-read comparison](docs/parallel-read-experiment.md) for
+an API-24 two-caller diagnostic. The market-open TDX A/B/A test did not show a
+consistent benefit; the flag stays off and is not a production optimization.
+
+The same investigation found that this Android 7 image pins foreground Apps to
+CPU 0 even with multiple online guest CPUs. After boot, the explicit isolated repair is:
+
+```sh
+rtk proxy timeout --signal=TERM --kill-after=10s 120s \
+  python3 scripts/configure_guest_smp.py --run-dir OWNED_RUN --adb SDK_ADB \
+  --output NEW_PRIVATE_RECEIPT --apply
+```
+
+It validates the exact guest, changes only volatile foreground/top-app CPU sets
+and restores ordinary ADB shell before App testing. It is not enabled on production resources and does not make the
+emulator ready for account collection.
