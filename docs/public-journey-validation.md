@@ -1,5 +1,9 @@
 # Public navigation acceptance gate
 
+Latest follow-up results and corrections are in
+[the quote traversal and startup experiment](quote-prefetch-experiment.md).
+The dated failed runs below remain historical evidence, not the current summary.
+
 This is isolated engineering validation, not Stock production acceptance. No
 account login, credential access, trading, production device binding, Scheduler
 operation, or P30 command is part of this probe.

@@ -29,12 +29,44 @@ def displayed_lines(output, package):
             if ' am_activity_launch_time:' in line and ',' + component + ',' in line}
 
 
+class AppStartupFailure(RuntimeError):
+    def __init__(self, events):
+        super().__init__("Observed App ANR or crash during startup")
+        self.events=events
+
+
+def failure_lines(output, package=None):
+    if package is not None and package not in ACTIVITIES:
+        raise ValueError("Unsupported public test App")
+    rows={line for line in output.splitlines() if re.search(r"\bam_(?:anr|crash)\s*:",line)}
+    if package is not None:
+        pattern=r"(?:\[|,)"+re.escape(package)+r"(?::[^,\]]+)?(?:,|\])"
+        rows={line for line in rows if re.search(pattern,line)}
+    return rows
+
+
+def wait_main_displayed(read, baseline, package, deadline, clock=time.monotonic, pause=time.sleep):
+    old_display=displayed_lines(baseline,package)
+    old_failures=failure_lines(baseline,package)
+    while clock()<deadline:
+        output=read()
+        failures=failure_lines(output,package)-old_failures
+        if failures:raise AppStartupFailure(failures)
+        if clock()>=deadline:break
+        shown=displayed_lines(output,package)-old_display
+        if shown:return shown
+        remaining=deadline-clock()
+        if remaining>0:pause(min(5,remaining))
+    raise TimeoutError("Main display event was not observed before the startup deadline")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--run-dir', type=Path, required=True)
     p.add_argument('--adb', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--package', choices=tuple(ACTIVITIES), required=True)
+    p.add_argument('--stop-other-test-app', action='store_true', help='Isolated AVD only: stop the other one of the two public test Apps before launch')
     args = p.parse_args()
     os.umask(0o077)
     owned_run(args.run_dir, 'emulator-5576')
@@ -53,6 +85,9 @@ def main():
         value = {'phase': name, 'seconds': round(time.monotonic()-started, 3)}
         events.append(value); print(json.dumps(value), flush=True)
     passed = False
+    stopped_peers=[]
+    def read_events():
+        return call(['logcat','-b','events','-d','-s','am_activity_launch_time:I','am_anr:I','am_crash:I','*:S'])
     try:
         phase = 'require_boot_complete'
         if call(['shell', 'getprop', 'sys.boot_completed']).strip() != '1':
@@ -60,10 +95,17 @@ def main():
         phase = 'resolve'
         component = launch_component(call(['shell', 'cmd', 'package', 'resolve-activity', '--brief',
             '-a', 'android.intent.action.MAIN', '-c', 'android.intent.category.LAUNCHER', args.package]), args.package)
+        if args.stop_other_test_app:
+            phase='stop_other_test_app'
+            for peer in ACTIVITIES:
+                if peer!=args.package:
+                    call(['shell','am','force-stop',peer])
+                    stopped_peers.append(peer)
+            event(phase)
         phase = 'stop_test_app'
         call(['shell', 'am', 'force-stop', args.package])
         phase = 'baseline'
-        baseline = displayed_lines(call(['logcat', '-b', 'events', '-d', '-t', '250']), args.package)
+        baseline = read_events()
         phase = 'launch_once'
         response = call(['shell', 'am', 'start', '-a', 'android.intent.action.MAIN',
                          '-c', 'android.intent.category.LAUNCHER', '-n', component])
@@ -72,17 +114,15 @@ def main():
             raise ValueError('Launch not acknowledged')
         event(phase)
         phase = 'await_main_displayed'
-        for attempt in range(12):
-            log = call(['logcat', '-b', 'events', '-d', '-t', '250'])
-            latest = displayed_lines(log, args.package)-baseline
-            if latest:
-                (args.output/'displayed.txt').write_text('\n'.join(sorted(latest))+'\n')
-                event(phase); passed=True; break
-            if time.monotonic()+5 >= deadline: break
-            time.sleep(5)
+        latest=wait_main_displayed(read_events,baseline,args.package,deadline)
+        (args.output/'displayed.txt').write_text('\n'.join(sorted(latest))+'\n')
+        event(phase);passed=True
     except Exception as error:
         events.append({'phase': phase, 'error_type': type(error).__name__})
+        if isinstance(error,AppStartupFailure):
+            (args.output/'failure-events.txt').write_text('\n'.join(sorted(error.events))+'\n')
     result = {'passed': passed, 'package': args.package, 'events': events,
+              'stopped_other_test_apps':stopped_peers, 'startup_limit_seconds':240,
               'elapsed_seconds': round(time.monotonic()-started,3),
               'account_input': False, 'production_cutover': False,
               'meaning': 'Activity displayed only; guarded capture still required'}

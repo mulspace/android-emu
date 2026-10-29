@@ -96,14 +96,16 @@ backend discarded optional diagnostic timing fields over its 30-second cap;
 the durations above come from the retained host RPC events, not that capped
 product telemetry. No production timeout or telemetry contract was changed.
 
-The complete cold navigation route still has not passed with the final candidate;
-its successful run began on the already-open quote. TDX was not retested with
-sibling prefetch. Remaining work is a cold-navigation/repeat comparison, TDX
-regression on the same candidate, and managed authenticated account acceptance.
-Do not promote this optional candidate to a production default yet.
+At the end of this first quote-only run, the complete startup/navigation route
+and TDX had not yet been retested with the final candidate. The follow-up
+sections below record those tests. Managed authenticated account acceptance
+remains outstanding; do not promote the optional candidate to production yet.
 
-All three native sessions confirmed cleanup. The crash buffer was empty and no
-ANR/crash events were found. The owned emulator stopped after 1116.31 seconds
+All three native sessions confirmed cleanup. The crash buffer was empty. A later
+parser audit corrected the initial no-ANR summary: the padded `am_anr  :` tag
+recorded one SystemUI TIME_TICK-broadcast ANR during boot, before the quote
+probes; no Junhong ANR was found in this run. Successful quote screenshots do
+not erase that emulator stability failure. The owned emulator stopped after 1116.31 seconds
 (explicit stop, exit -10); its process was absent and ports 5576/5577 were free.
 P30 and production services were untouched. Sixty-three repository tests passed,
 including one-shot complete navigation, known-dialog priority, wrong child/window
@@ -117,3 +119,81 @@ entry for that account test. Existing broker-login authorization remains valid,
 but no credential values, borrowed session or synthetic tenant Context may be
 used to replace the missing managed entry. Stock tasks must remain on their
 existing device until both Apps pass the actual collection requirements.
+
+## Fresh-run TDX regression and Junhong startup failure
+
+The same final candidate was tested in a newly booted isolated AVD. TDX's process
+was started once; MainScreen readiness took 45.871 seconds. Public search, exact
+600999 result selection, 日K selection and all three bound-image pairs passed in
+144.666 seconds including native setup and cleanup. Image RPCs took 12.698,
+6.342 and 5.303 seconds; all six original receipts passed offline backend replay.
+Visual inspection showed 招商证券 / 600999, 日K and the 2026/10/29 chart date.
+The capture was pre-open and showed zero opening price/volume; those fields must
+not be described as verified intraday activity.
+
+Starting Junhong after this TDX test failed cold-readiness validation. The App
+later emitted its MainScreen display event (104.805-second Activity chain), but
+an Android "isn't responding" modal was actually present. The attempted native
+journey failed on its first foreground read (`SecurityException`) and cleaned
+up after 39.274 seconds, with **zero navigation actions**. No Wait/Close button
+was pressed and no late display event was treated as a passing startup receipt.
+
+Retained system logs identify an `AppwidgetUpdateService` execution timeout.
+The exact Junhong main-process stack was captured this time: its main thread
+waited in Binder `ActivityManagerProxy.registerReceiver` during `MainScreen`
+initialization. The contemporaneous system CPU interval reported TDX at 50%,
+Junhong at 22% and system_server at 13%. This supports testing background-App
+contention, but does not prove it is the sole cause. The previous missing-main-
+stack evidence must not be substituted for this current stack.
+
+The runner was explicitly stopped after 795.26 seconds; both native sessions
+confirmed cleanup, the owned PID exited and ports 5576/5577 were free.
+
+The public startup helper now uses its original 240-second absolute deadline
+instead of ending after twelve polls. It recognizes padded ANR/crash tags,
+rejects new App failures even if a MainScreen event is also present, and retains
+the exact failure event privately. `--stop-other-test-app` is an explicit
+isolation experiment: it can stop only the other of the two named test Apps on
+the verified owned emulator before the target App's single launch. It is off by
+default and does not change production task/App lifecycle policy. Sixty-six
+repository tests passed after these changes.
+
+## Explicit peer-isolation comparison
+
+A new bounded run explicitly stopped only TDX on the isolated emulator before
+starting Junhong once. The startup helper passed after 65.316 seconds, including
+the peer-stop step, with no new Junhong failure event. The same prefetch candidate
+then completed market selection, public symbol entry, two matching exact-result
+observations, one result tap and three original-frame-bound quote image pairs.
+That complete navigation/capture probe passed in 174.261 seconds including native
+initialization and cleanup; its image RPCs were 13.432, 13.533 and 16.394 seconds.
+All six original read/image receipts passed unchanged backend validation offline.
+
+This comparison supports further testing of background App contention, but it
+is not a randomized speed benchmark. By 09:06 the broker feed had reset to its
+pre-open state: the screen showed 600999 with opening values absent, an empty
+intraday plot and no active order-book prices. That changed rendering workload
+can also affect latency. These images prove guarded public UI capture, **not**
+fresh tradable quotes. Do not attribute the entire speed difference to peer
+isolation or silently use the empty fields for analysis.
+
+The same current-page check was then repeated with the **original 30-second**
+snapshot RPC deadline. All three bound images passed in 15.106, 11.115 and
+11.569 seconds; the complete read-only probe, including initialization and
+cleanup, took 106.284 seconds. All six original receipts passed offline backend
+validation. Thus this last public-page result did not depend on the diagnostic
+90-second timeout, although the earlier full navigation run used that setting.
+
+The corrected event parser found zero ANR/crash events in this final isolated
+run, and its crash buffer was empty. Both native sessions acknowledged cleanup.
+The explicit owned stop ended the emulator after 688.23 seconds with exit -10;
+the owned PID was absent and ports 5576/5577 were free. No P30 command, production
+binding change, live Scheduler operation, broker login or trade occurred.
+
+These are bounded pre-open engineering results, not a blanket stability claim.
+Remaining acceptance work includes changing intraday quotes, managed login,
+complete account funds/holdings (including all scrolled rows), and the approved
+managed device binding. The desktop's authenticated ingress was rechecked and
+still returned HTTP 401; no managed App tool is available here. Broker-login
+permission is retained, but it does not supply that missing authenticated
+platform Context. Do not switch Stock tasks based only on these public tests.

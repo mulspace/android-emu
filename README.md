@@ -188,9 +188,12 @@ are documented in [Kengent capture integration](docs/kengent-api24-capture.md).
 
 Use [the bounded public journey probe](docs/public-journey-validation.md) to test
 launch, deterministic navigation and three strictly bound screenshots together.
-The current cold/warm end-to-end gate still fails; earlier successful settled
-screenshots do not establish production Stock readiness. Account collection
-requires the managed Stock App and trusted account Context.
+Recent isolated runs passed TDX daily-chart capture and Junhong public quote
+capture with the optional prefetch candidate. Junhong startup still failed when
+TDX remained busy in the background; the explicit peer-isolation comparison is
+recorded below. These pre-open public tests do not establish live-market or
+complete-account readiness. Account collection requires the managed Stock App
+and trusted account Context; production Stock bindings remain unchanged.
 
 See [snapshot diagnostics and the single-pass experiment](docs/snapshot-observation-diagnostics.md)
 for reproducible no-GDB comparisons, numeric observation timing and the
