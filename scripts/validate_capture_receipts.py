@@ -32,6 +32,8 @@ async def main(directory):
     from kengent.contracts.execution import ExecutionContext, IOBindings
     from kengent.tools.resource_node import android
     receipt = json.loads((directory / 'receipt.json').read_text())
+    if receipt.get('read_only_quote_capture'):
+        raise ValueError('Experimental quote evidence requires audit_read_only_quote.py; it is not production acceptance')
     events = {e['phase']: e for e in receipt['events'] if e['phase'].startswith('snapshot_') and e['ok']}
     outcomes = []
     context = ExecutionContext(scope='tenant', tenant_id='offline-fixture', workgroup_id='offline',

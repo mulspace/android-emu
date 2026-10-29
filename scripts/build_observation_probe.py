@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import sys
 from unittest.mock import patch
+from quote_read_probe import instrument_quote_read
 
 def instrument(source):
     """Strict anchors: refuse source drift instead of changing snapshot checks."""
@@ -177,6 +178,7 @@ def main():
     parser.add_argument("--kengent-root", type=Path, required=True)
     parser.add_argument("--sdk-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--read-only-quote", action="store_true", help="Opt-in public Junhong quote capture; cannot authorize physical input")
     parser.add_argument("--single-pass", action="store_true", help="Experimental complete tree/sensitivity traversal; not a production build")
     parser.add_argument("--prefetch-siblings", action="store_true", help="API-24 diagnostic: framework sibling prefetch, preserving complete traversal")
     parser.add_argument("--parallel-children", action="store_true", help="API-24 diagnostic: two sibling reads in parallel; requires single-pass and sibling prefetch")
@@ -192,6 +194,8 @@ def main():
         parser.error("--prefetch-siblings requires --single-pass")
     if args.parallel_children and (not args.single_pass or not args.prefetch_siblings or args.recover_stable_child):
         parser.error("--parallel-children requires --single-pass --prefetch-siblings and excludes child recovery")
+    if args.read_only_quote and (not args.single_pass or not args.prefetch_siblings):
+        parser.error("--read-only-quote requires --single-pass --prefetch-siblings")
     os.umask(0o077)
     args.output.mkdir(parents=True, exist_ok=False)
     sys.path.insert(0, str(args.kengent_root / "src"))
@@ -243,6 +247,9 @@ def main():
         raise ValueError("Mismatch logger source anchor changed")
     instrumented = instrumented.replace(anchor, anchor + '            android.util.Log.i("EmuObservation", "mismatch " + error.diagnostic);\n')
     instrumented = hierarchy_retry_delay(instrumented, args.hierarchy_retry_delay_ms)
+    if args.read_only_quote:
+        instrumented = instrument_quote_read(instrumented)
+        shutil.copyfile(args.experimental_source / "ReadOnlyQuote.java", copied / "ReadOnlyQuote.java")
     source.write_text(instrumented)
     resource_files = android.resources.files
     def resources(name):
@@ -252,6 +259,7 @@ def main():
     shutil.copyfile(engine, args.output / "u2.jar")
     shutil.copyfile(bridge, args.output / "bridge.jar")
     receipt = {"diagnostic_only": True, "device_operations": False, "experimental_single_pass": args.single_pass,
+               "experimental_read_only_quote": args.read_only_quote,
                "experimental_checked_retry": args.retry_incomplete_checked,
                "numeric_hierarchy_timing": args.single_pass,
                "experimental_sibling_prefetch": args.prefetch_siblings,

@@ -14,8 +14,10 @@ failed repeatability checks and an opt-in, identity-preserving recovery probe. T
 candles and three strictly paired Junhong public-search captures have passed
 on the isolated test device. Junhong quote-page capture still times out or rejects changing content; startup
 repeatability, authenticated funds/holdings capture and production cutover are
-**not** established. See the [latest readiness and collection results](docs/native-ready-window.md),
-the [host CPU experiment](docs/host-headroom-experiment.md) and the
+**not** established. An opt-in [read-only public quote contract](docs/read-only-quote-contract.md)
+now passes three Junhong quote captures and rejects input authority, but cold
+startup and production Stock acceptance remain unfinished. See also the
+[readiness investigation](docs/native-ready-window.md) and
 [earlier public-page results](docs/public-journey-validation.md).
 
 The public `emu-30-release` manifest is the initial build baseline. Its pinned

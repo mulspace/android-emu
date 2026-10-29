@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded public navigation on an owned diagnostic AVD; never account input."""
 import argparse
+import hashlib
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,7 @@ from probe_public_capture import owned_run, validate_checked_pair
 
 from trace_native_start import traced_session_type
 from native_ready_probe import ready_session_type
+from quote_read_probe import options as quote_options, validate_receipt as validate_quote_receipt, verify_input_denial
 
 TDX = "com.tdx.AndroidNew"
 JUNHONG = "com.guotai.dazhihui"
@@ -116,10 +118,13 @@ def broker_quote_ready(items):
 
 
 class Journey:
-    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market", tdx_page="market"):
+    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market", tdx_page="market", read_only_quote=False):
         self.package, self.capture, self.action, self.pause = package, capture, action, pause
         self.junhong_page = junhong_page
         self.tdx_page = tdx_page
+        self.read_only_quote = read_only_quote
+        if read_only_quote and (package != JUNHONG or junhong_page not in ("quote", "search-quote", "result")):
+            raise ValueError("Read-only quote requires a verified Junhong quote route")
         if tdx_page not in ("market", "quote") or (tdx_page != "market" and package != TDX):
             raise ValueError("Invalid TDX public route")
         if junhong_page not in ("market", "search", "result", "quote", "search-quote") or (junhong_page != "market" and package != JUNHONG):
@@ -232,25 +237,37 @@ class Journey:
         # Capture identity/date must be visually checked: TDX draws the header in a canvas.
         # Do not fabricate an XML stock code or report account/market acceptance here.
         for index in range(3):
+            if self.read_only_quote:
+                current = await self.capture(f"snapshot_{index+1}_quote", quote_options())
+                validate_quote_receipt(current)
+                nodes(current, self.package)
+                continue
             previous = await self.capture(f"snapshot_{index+1}_observe", {"include_image": False, "include_xml": True})
             nodes(previous, self.package)
             current = await self.capture(f"snapshot_{index+1}_checked", {"include_image": True,
                 "include_xml": True, "image_format": "jpeg", "expected_frame_ref": previous["frame_ref"]})
             nodes(current, self.package)
             validate_checked_pair(previous, current)
+        return current
 
 
 async def probe(args):
     from kengent.tools.resource_node.android import AdbTransport, NativeSession, _snapshot_hierarchy, _snapshot_image
     owned_run(args.run_dir, args.serial)
+    if args.read_only_quote:
+        build = json.loads((args.artifacts / "build.json").read_text())
+        if build.get("experimental_read_only_quote") is not True or build.get("bridge_sha256") != hashlib.sha256((args.artifacts / "bridge.jar").read_bytes()).hexdigest():
+            raise ValueError("Audited read-only quote bridge is required")
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     events = []
     receipt = {"started_at": datetime.now(UTC).isoformat(),
                "public_only": True, "production_cutover": False, "account_input": False,
                "account_collection_verified": False, "package": args.package,
+               "artifact_sha256": {name: hashlib.sha256((args.artifacts / name).read_bytes()).hexdigest()
+                                   for name in ("u2.jar", "bridge.jar")},
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
                "duration_limit_seconds": args.seconds,
-               "checked_capture": True, "events": events, "visual_review_required": True,
+               "checked_capture": not args.read_only_quote, "read_only_quote_capture": args.read_only_quote, "events": events, "visual_review_required": True,
                "launch_mode": "prestarted" if args.prestarted else "native",
                "public_page": "broker_" + args.junhong_page if args.package == JUNHONG else "tdx_" + args.tdx_page + "_to_daily_chart"}
     session, passed, phase = None, False, "identify"
@@ -306,6 +323,8 @@ async def probe(args):
                 return raw
             async def capture(name, options):
                 raw = await call(name, "android.snapshot", options)
+                if options.get("read_only_quote"):
+                    validate_quote_receipt(raw)
                 result = dict(raw)
                 _snapshot_hierarchy(result, options)
                 if options["include_image"]:
@@ -314,7 +333,13 @@ async def probe(args):
                 return raw
             if not args.prestarted:
                 await call("launch_app_once", "android.start_app", {"package": args.package})
-            await Journey(args.package, capture, call, junhong_page=args.junhong_page, tdx_page=args.tdx_page).navigate()
+            last = await Journey(args.package, capture, call, junhong_page=args.junhong_page,
+                tdx_page=args.tdx_page, read_only_quote=args.read_only_quote).navigate()
+            if args.read_only_quote:
+                phase = "read_only_input_denial"
+                owned_run(args.run_dir, args.serial)
+                receipt["input_denial_verified"] = await verify_input_denial(session.call, last["frame_ref"])
+                event(phase=phase, ok=True, physical_input=False)
             passed = True
     except BaseException as error:
         event(phase=phase, ok=False, type=type(error).__name__,
@@ -343,6 +368,7 @@ def main():
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
     parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote", "search-quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, current quote, or complete search-quote")
     parser.add_argument("--tdx-page", choices=("market", "quote"), default="market", help="Start from the market page or a previously verified open public quote; never repeat uncertain navigation")
+    parser.add_argument("--read-only-quote", action="store_true", help="Public Junhong quote evidence with dynamic numeric values; never input authority")
     parser.add_argument("--native-ready-seconds", type=int, choices=(10, 30), default=10,
                         help="Opt-in startup wait comparison, bounded by the original lease; no input/capture changes")
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
@@ -351,6 +377,8 @@ def main():
     parser.add_argument("--seconds", type=int, choices=(180, 300, 600), default=600,
                         help="Whole journey deadline, followed by bounded session cleanup")
     args = parser.parse_args()
+    if args.read_only_quote and (args.package != JUNHONG or args.junhong_page not in ("quote", "search-quote", "result")):
+        parser.error("Read-only quote requires a verified Junhong quote route")
     if args.junhong_page != "market" and args.package != JUNHONG:
         parser.error("Junhong public routes require Junhong")
     if args.tdx_page != "market" and args.package != TDX:

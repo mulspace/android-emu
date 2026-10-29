@@ -14,6 +14,7 @@ import uuid
 
 from trace_native_start import traced_session_type
 from native_ready_probe import ready_session_type
+from quote_read_probe import options as quote_options, validate_receipt as validate_quote_receipt, verify_input_denial
 
 
 def owned_run(path, serial, proc_root=Path('/proc')):
@@ -66,6 +67,10 @@ def validate_checked_pair(previous, current):
 async def probe(args):
     from kengent.tools.resource_node.android import AdbTransport, NativeSession, _snapshot_hierarchy, _snapshot_image
     owned_run(args.run_dir, args.serial)
+    if args.read_only_quote:
+        build = json.loads((args.artifacts / "build.json").read_text())
+        if build.get("experimental_read_only_quote") is not True or build.get("bridge_sha256") != hashlib.sha256((args.artifacts / "bridge.jar").read_bytes()).hexdigest():
+            raise ValueError("Audited read-only quote bridge is required")
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     events = []
     receipt = {"started_at": datetime.now(UTC).isoformat(),
@@ -73,6 +78,7 @@ async def probe(args):
                "package": args.package, "timing_profile": "arm-emulator", "events": events,
                "duration_limit_seconds": args.seconds,
                "checked_capture": args.checked,
+               "read_only_quote_capture": args.read_only_quote,
                "artifact_sha256": {name: hashlib.sha256((args.artifacts / name).read_bytes()).hexdigest()
                                    for name in ("u2.jar", "bridge.jar")}}
     session = None
@@ -110,6 +116,8 @@ async def probe(args):
                 raw = await session.call("android.snapshot", {"arguments": options})
                 # Keep the ORIGINAL wire receipt privately for offline backend validation.
                 (args.output / f"{phase}.wire.json").write_text(json.dumps(raw) + "\n")
+                if args.read_only_quote:
+                    validate_quote_receipt(raw)
                 result = dict(raw)
                 _snapshot_hierarchy(result, options)
                 if previous is not None:
@@ -131,9 +139,14 @@ async def probe(args):
                     options["expected_frame_ref"] = previous["frame_ref"]
                     await capture_snapshot(f"snapshot_{index+1}_checked", options, previous)
                 else:
-                    await capture_snapshot(f"snapshot_{index+1}", options)
+                    last = await capture_snapshot(f"snapshot_{index+1}", quote_options() if args.read_only_quote else options)
                 if index + 1 < args.count:
                     await asyncio.sleep(1)
+            if args.read_only_quote:
+                phase = "read_only_input_denial"
+                owned_run(args.run_dir, args.serial)
+                receipt["input_denial_verified"] = await verify_input_denial(session.call, last["frame_ref"])
+                event({"phase": phase, "ok": True, "physical_input": False})
     except BaseException as error:
         value = {"phase": phase, "ok": False, "type": type(error).__name__}
         if hasattr(error, "problem"):
@@ -152,7 +165,8 @@ async def probe(args):
         receipt["elapsed_seconds"] = round(time.monotonic() - started, 3)
         receipt["ended_at"] = datetime.now(UTC).isoformat()
         receipt["passed"] = (len([e for e in events if e["phase"].startswith("snapshot_") and e["ok"]]) == args.count * (2 if args.checked else 1)
-                             and receipt.get("cleanup_confirmed") is True)
+                             and receipt.get("cleanup_confirmed") is True
+                             and (not args.read_only_quote or receipt.get("input_denial_verified") is True))
         (args.output / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         print(json.dumps({"passed": receipt["passed"], "cleanup_confirmed": receipt.get("cleanup_confirmed"),
                           "elapsed_seconds": receipt["elapsed_seconds"]}), flush=True)
@@ -173,8 +187,11 @@ def main():
                         help="Bound this read-only diagnostic before the emulator outer deadline")
     parser.add_argument("--native-ready-seconds", type=int, choices=(10, 30), default=10,
                         help="Opt-in startup wait comparison, bounded by the original lease; no input/capture changes")
+    parser.add_argument("--read-only-quote", action="store_true", help="Opt-in bound public quote identity with live numeric values; no input authority")
     parser.add_argument("--checked", action="store_true", help="Observe XML then capture the exact same frame, as Stock does")
     args = parser.parse_args()
+    if args.read_only_quote and (args.checked or args.package != "com.guotai.dazhihui"):
+        parser.error("Read-only quote mode supports Junhong only and cannot be combined with strict frame mode")
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))
     os.umask(0o077)
     async def run():
