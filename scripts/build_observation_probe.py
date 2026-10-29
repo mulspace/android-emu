@@ -70,6 +70,24 @@ def hierarchy_retry_delay(source, milliseconds):
     return source[:start] + block.replace(anchor, f"SystemClock.sleep({milliseconds}L); alive();") + source[end:]
 
 
+
+def startup_diagnostics(source):
+    """Timestamp fixed startup phases; preserve all deadlines and failure paths."""
+    first = source.index("    private static void serve(PrintStream wire) {")
+    end = source.index("    public static void main(String[] args)", first)
+    block = source[first:end]
+    anchor = '        String phase = "service_configurator";'
+    if block.count(anchor) != 1:
+        raise ValueError("Startup diagnostic source anchor changed")
+    block = block.replace(anchor, anchor + '\n        long startupTick=SystemClock.elapsedRealtime();\n        android.util.Log.i("EmuStartup", "phase=configurator elapsed_ms=0");')
+    for phase in ("service_automation", "service", "ready"):
+        anchor = f'            phase = "{phase}";'
+        if block.count(anchor) != 1:
+            raise ValueError("Startup diagnostic source anchor changed")
+        block = block.replace(anchor, anchor + f'\n            android.util.Log.i("EmuStartup", "phase={phase} elapsed_ms=" + (SystemClock.elapsedRealtime()-startupTick));')
+    return source[:first] + block + source[end:]
+
+
 def recover_stable_child(source):
     """Retry an absent child only if all cached parent/child identities survive refresh."""
     anchor = """                int before=node.getChildCount();
@@ -148,7 +166,7 @@ def main():
         before[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
         shutil.copyfile(path, copied / path.name)
     source = copied / "ResourceDeviceBridge.java"
-    instrumented = instrument(source.read_text())
+    instrumented = startup_diagnostics(instrument(source.read_text()))
     if args.single_pass:
         first = instrumented.index('            xml = tree();', instrumented.index('class SnapshotState'))
         last = instrumented.index('            phase = "snapshot_stability";', first)
@@ -186,7 +204,7 @@ def main():
     receipt = {"diagnostic_only": True, "device_operations": False, "experimental_single_pass": args.single_pass,
                "experimental_checked_retry": args.retry_incomplete_checked,
                "experimental_stable_child_recovery": args.recover_stable_child,
-               "hierarchy_retry_delay_ms": args.hierarchy_retry_delay_ms, "numeric_mismatch_diagnostics": True, "source_hashes": before,
+               "hierarchy_retry_delay_ms": args.hierarchy_retry_delay_ms, "numeric_mismatch_diagnostics": True, "numeric_startup_diagnostics": True, "source_hashes": before,
                "built_source_hashes": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in copied.glob("*.java")},
                "bridge_sha256": hashlib.sha256(bridge.read_bytes()).hexdigest(),
                "instrumented_source_sha256": hashlib.sha256(source.read_bytes()).hexdigest()}

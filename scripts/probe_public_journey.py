@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 
 from probe_public_capture import owned_run, validate_checked_pair
 
+from trace_native_start import traced_session_type
+
 TDX = "com.tdx.AndroidNew"
 JUNHONG = "com.guotai.dazhihui"
 
@@ -77,9 +79,47 @@ def inline_notice(items):
     return close
 
 
+def broker_result(items):
+    required={
+        "et_input_edit":"600999", "tv_stock_market":"沪A",
+        "tv_stock_code":"600999", "tv_stock_name":"招商证券",
+    }
+    for key,value in required.items():
+        match=unique(items,lambda n:n.get("resource-id")==JUNHONG+":id/"+key and n.get("text")==value)
+        if match is None:return None
+        if key != "et_input_edit":
+            bounds=re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",match.get("bounds",""))
+            if bounds is None:return None
+            left,top,right,bottom=map(int,bounds.groups())
+            if not (0 <= left < right <= 720 and 318 <= top < bottom <= 432):return None
+    # Exact observed first stock row, not the add-to-watchlist icon or news below it.
+    return unique(items,lambda n:n.get("class")=="android.widget.LinearLayout"
+                  and n.get("bounds")=="[0,318][720,432]" and n.get("clickable")=="true")
+
+
+def broker_layout_cancel(items):
+    labels={"tv_right":"五档在右边", "tv_below":"五档在下边",
+            "tv_five_level_remind":"您还可以到“我的-设置-行情设置”里进行切换"}
+    if not any(n.get("text")=="五档/分时位置自由选择" for n in items):return None
+    if not all(unique(items,lambda n:n.get("resource-id")==JUNHONG+":id/"+key
+                      and n.get("text")==value) is not None for key,value in labels.items()):return None
+    return unique(items,lambda n:n.get("resource-id")==JUNHONG+":id/tv_cancel"
+        and n.get("text")=="取消" and n.get("bounds")=="[40,977][359,1067]"
+        and n.get("clickable")=="true")
+
+
+def broker_quote_ready(items):
+    if not all(any(n.get("text")==value for n in items) for value in ("600999","招商证券","分时")):
+        return None
+    return unique(items,lambda n:n.get("text")=="600999")
+
+
 class Journey:
-    def __init__(self, package, capture, action, pause=asyncio.sleep):
+    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market"):
         self.package, self.capture, self.action, self.pause = package, capture, action, pause
+        self.junhong_page = junhong_page
+        if junhong_page not in ("market", "search", "result", "quote") or (junhong_page != "market" and package != JUNHONG):
+            raise ValueError("Invalid Junhong public route")
 
     async def wait(self, phase, selector, *, stable=False):
         previous = None
@@ -99,22 +139,55 @@ class Journey:
         await self.action(phase, "android.tap", center(frame, chosen))
 
     async def navigate(self):
-        if self.package == JUNHONG:
+        if self.junhong_page in ("result", "quote"):
+            if self.junhong_page == "result":
+                frame, chosen = await self.wait("broker_known_result", broker_result, stable=True)
+                await self.tap("open_broker_quote_once", frame, chosen)
+            frame, chosen = await self.wait("broker_quote_entry", lambda ns: broker_quote_ready(ns) or broker_layout_cancel(ns))
+            if chosen.get("resource-id") == JUNHONG + ":id/tv_cancel":
+                await self.tap("cancel_known_quote_layout_once", frame, chosen)
+                await self.wait("broker_quote_ready", broker_quote_ready)
+        elif self.package == JUNHONG:
+            def market_tab(ns):
+                return unique(ns, lambda n: n.get("resource-id") == JUNHONG + ":id/tv_free_stock_market"
+                    and n.get("text") == "行情" and n.get("clickable") == "true")
             frame, chosen = await self.wait("public_home", lambda ns: unique(ns, lambda n:
                 n.get("resource-id") == JUNHONG + ":id/bottom_menu_button2"
                 and n.get("clickable") == "true") if any(n.get("text") == "行情"
                 and n.get("resource-id") == JUNHONG + ":id/btm_text2" for n in ns) else None)
-            await self.tap("open_market_once", frame, chosen)
-            def market_tab(ns):
-                return unique(ns, lambda n: n.get("resource-id") == JUNHONG + ":id/tv_free_stock_market"
-                    and n.get("text") == "行情" and n.get("clickable") == "true")
-            frame, chosen = await self.wait("public_market_tab", market_tab)
-            if chosen.get("selected") != "true":
-                await self.tap("open_public_market_once", frame, chosen)
-            def selected_market(ns):
-                tab = market_tab(ns)
-                return tab if tab and tab.get("selected") == "true" else None
-            await self.wait("market_ready", selected_market)
+            tab = market_tab(nodes(frame, self.package))
+            if tab is None:
+                await self.tap("open_market_once", frame, chosen)
+                frame, tab = await self.wait("public_market_tab", market_tab)
+            if tab.get("selected") != "true":
+                await self.tap("open_public_market_once", frame, tab)
+                def selected_market(ns):
+                    current = market_tab(ns)
+                    return current if current and current.get("selected") == "true" else None
+                frame, _ = await self.wait("market_ready", selected_market)
+            if self.junhong_page == "search":
+                def search_control(ns):
+                    return unique(ns, lambda n: n.get("resource-id") == JUNHONG + ":id/title_search"
+                        and n.get("class") == "android.widget.RelativeLayout"
+                        and n.get("bounds") == "[640,56][688,128]"
+                        and n.get("clickable") == "true")
+                # The verified market observation already contains this control.
+                # Keep its original frame_ref; the normal native input guard still applies.
+                chosen = search_control(nodes(frame, self.package))
+                if chosen is None:
+                    frame, chosen = await self.wait("broker_search_control", search_control)
+                await self.tap("open_broker_public_search_once", frame, chosen)
+                def broker_field(ns):
+                    return unique(ns, lambda n: n.get("class") == "android.widget.EditText"
+                        and n.get("focused") == "true" and n.get("password") == "false"
+                        and n.get("enabled") == "true")
+                frame, _ = await self.wait("broker_search_field", broker_field)
+                await self.action("enter_broker_public_symbol_once", "android.text",
+                                  {"frame_ref": frame["frame_ref"], "text": "600999"})
+                def symbol_readback(ns):
+                    field = broker_field(ns)
+                    return field if field and field.get("text") == "600999" else None
+                await self.wait("broker_symbol_readback", symbol_readback, stable=True)
         elif self.package == TDX:
             frame, chosen = await self.wait("market_ready", tdx_search)
             await self.tap("open_search_once", frame, chosen)
@@ -164,7 +237,8 @@ async def probe(args):
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
                "duration_limit_seconds": args.seconds,
                "checked_capture": True, "events": events, "visual_review_required": True,
-               "launch_mode": "prestarted" if args.prestarted else "native"}
+               "launch_mode": "prestarted" if args.prestarted else "native",
+               "public_page": "broker_" + args.junhong_page if args.package == JUNHONG else "tdx_daily_chart"}
     session, passed, phase = None, False, "identify"
     started = time.monotonic()
     deadline = datetime.now(UTC) + timedelta(seconds=args.seconds)
@@ -185,7 +259,8 @@ async def probe(args):
                        "expires_at": min(deadline, datetime.now(UTC) + timedelta(seconds=280)).isoformat()}
             receipt["nonce"] = context["nonce"]
             phase = "native_start"
-            session = NativeSession(transport, context, [args.package])
+            traced = traced_session_type(NativeSession, lambda value: event(**value))
+            session = traced(transport, context, [args.package])
             await session.start(context)
             event(phase=phase, ok=True, seconds=round(time.monotonic()-started, 3))
             last_renewal = time.monotonic()
@@ -222,7 +297,7 @@ async def probe(args):
                 return raw
             if not args.prestarted:
                 await call("launch_app_once", "android.start_app", {"package": args.package})
-            await Journey(args.package, capture, call).navigate()
+            await Journey(args.package, capture, call, junhong_page=args.junhong_page).navigate()
             passed = True
     except BaseException as error:
         event(phase=phase, ok=False, type=type(error).__name__,
@@ -248,12 +323,15 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--serial", choices=("emulator-5576",), default="emulator-5576")
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
+    parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, or current 600999 quote")
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")
     parser.add_argument("--seconds", type=int, choices=(180, 300, 600), default=600,
                         help="Whole journey deadline, followed by bounded session cleanup")
     args = parser.parse_args()
+    if args.junhong_page != "market" and args.package != JUNHONG:
+        parser.error("Junhong public routes require Junhong")
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))
     os.umask(0o077)
     async def run():

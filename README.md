@@ -11,9 +11,11 @@ and symbolized builds. Current work targets cold startup and repeatable guarded
 capture with unmodified Junhong/TongdaXin ARM32 APKs. The latest
 [missing-node investigation](docs/incomplete-hierarchy-diagnostics.md) records
 failed repeatability checks and an opt-in, identity-preserving recovery probe. TongdaXin public daily
-candles and three strictly paired Junhong public-market captures have passed
-on the isolated test device. Cold-start ANRs remain; complete authenticated
-funds/holdings capture and production cutover are **not** established.
+candles and three strictly paired Junhong public-search captures have passed
+on the isolated test device. Junhong quote-page capture still exceeds the
+30-second read deadline; startup repeatability, authenticated funds/holdings
+capture and production cutover are **not** established. See the
+[latest public-page results](docs/public-journey-validation.md).
 
 The public `emu-30-release` manifest is the initial build baseline. Its pinned
 source is **not claimed to be the exact source of build 7196367**. Each binary's

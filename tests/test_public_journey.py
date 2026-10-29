@@ -6,7 +6,7 @@ import unittest
 import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from probe_public_journey import Journey, JUNHONG, TDX, center, daily, inline_notice, nodes, tdx_search
+from probe_public_journey import Journey, JUNHONG, TDX, center, daily, inline_notice, nodes, tdx_search, broker_result, broker_quote_ready, broker_layout_cancel
 
 
 def node(**kw):
@@ -62,6 +62,31 @@ class Selectors(unittest.TestCase):
             inline_notice(chart() + [node(text="其它内容", bounds="[49,387][671,446]")])
         self.assertIsNone(inline_notice(chart() + [node(text="关闭")]))
 
+    def test_broker_result_requires_exact_symbol_name_and_observed_row(self):
+        items=[node(package=JUNHONG,text=value,bounds="[100,348][230,388]" if key != "et_input_edit" else "[178,73][538,113]",**{"resource-id":JUNHONG+":id/"+key})
+               for key,value in {"et_input_edit":"600999","tv_stock_code":"600999","tv_stock_name":"招商证券","tv_stock_market":"沪A"}.items()]
+        row=node(package=JUNHONG,bounds="[0,318][720,432]",**{"class":"android.widget.LinearLayout"})
+        self.assertEqual(broker_result(items+[row]),row)
+        self.assertIsNone(broker_result(items))
+        moved=deepcopy(items);moved[1]["bounds"]="[100,500][230,540]"
+        self.assertIsNone(broker_result(moved+[row]))
+        for i in range(len(items)):
+            changed=deepcopy(items);changed[i]["text"]="other"
+            self.assertIsNone(broker_result(changed+[row]))
+        with self.assertRaises(ValueError):broker_result(items+[row,row])
+        self.assertIsNone(broker_quote_ready(items))
+
+    def test_only_known_quote_layout_can_be_cancelled(self):
+        labels={"tv_right":"五档在右边","tv_below":"五档在下边","tv_five_level_remind":"您还可以到“我的-设置-行情设置”里进行切换"}
+        items=[node(package=JUNHONG,text=v,**{"resource-id":JUNHONG+":id/"+k}) for k,v in labels.items()]
+        items.append(node(package=JUNHONG,text="五档/分时位置自由选择"))
+        cancel=node(package=JUNHONG,text="取消",bounds="[40,977][359,1067]",**{"resource-id":JUNHONG+":id/tv_cancel"})
+        self.assertEqual(broker_layout_cancel(items+[cancel]),cancel)
+        self.assertIsNone(broker_layout_cancel([cancel]))
+        for i in range(len(items)):
+            self.assertIsNone(broker_layout_cancel(items[:i]+items[i+1:]+[cancel]))
+        with self.assertRaises(ValueError):broker_layout_cancel(items+[cancel,cancel])
+
     def test_tap_requires_in_bounds_enabled_control(self):
         for delta in ({"bounds": "[-1,2][3,4]"}, {"bounds": "[0,0][721,1560]"},
                       {"clickable": "false"}, {"enabled": "false"}):
@@ -105,7 +130,62 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
         async def action(phase, operation, options):
             actions.append(phase)
         await Journey(JUNHONG, capture, action).navigate()
-        self.assertEqual(actions, ["open_market_once"])
+        self.assertEqual(actions, [])
+
+    async def test_optional_broker_search_only_types_public_symbol_once(self):
+        home=frame([node(package=JUNHONG,text="行情",clickable="false",**{"resource-id":JUNHONG+":id/btm_text2"}),
+                    node(package=JUNHONG,**{"resource-id":JUNHONG+":id/bottom_menu_button2"})],JUNHONG)
+        market=frame([node(package=JUNHONG,text="行情",selected="true",**{"resource-id":JUNHONG+":id/tv_free_stock_market"})],JUNHONG)
+        search=frame([node(package=JUNHONG,**{"resource-id":JUNHONG+":id/title_search","class":"android.widget.RelativeLayout","bounds":"[640,56][688,128]"})],JUNHONG)
+        field=node(package=JUNHONG,text="",focused="true",password="false",**{"class":"android.widget.EditText"})
+        typed=frame([{**field,"text":"600999"}],JUNHONG)
+        pending=[home,market,search,frame([field],JUNHONG),typed,typed]
+        actions=[]
+        async def capture(phase,options):
+            value=deepcopy(pending.pop(0) if pending else typed)
+            if "expected_frame_ref" in options:value["based_on_frame_ref"]=options["expected_frame_ref"]
+            return value
+        async def action(phase,op,options):actions.append((phase,op,options))
+        async def pause(seconds):pass
+        await Journey(JUNHONG,capture,action,pause,junhong_page="search").navigate()
+        self.assertEqual([a[0] for a in actions],["open_market_once","open_broker_public_search_once","enter_broker_public_symbol_once"])
+        self.assertEqual(actions[-1][2]["text"],"600999")
+        with self.assertRaises(ValueError):Journey(TDX,capture,action,junhong_page="search")
+
+    async def test_broker_search_reuses_fresh_selected_market_frame(self):
+        field=node(package=JUNHONG,text="",focused="true",password="false",**{"class":"android.widget.EditText"})
+        market=frame([node(package=JUNHONG,text="行情",clickable="false",**{"resource-id":JUNHONG+":id/btm_text2"}),
+            node(package=JUNHONG,**{"resource-id":JUNHONG+":id/bottom_menu_button2"}),
+            node(package=JUNHONG,text="行情",selected="true",**{"resource-id":JUNHONG+":id/tv_free_stock_market"}),
+            node(package=JUNHONG,**{"resource-id":JUNHONG+":id/title_search","class":"android.widget.RelativeLayout","bounds":"[640,56][688,128]"})],JUNHONG)
+        market["frame_ref"]="original-market"
+        typed=frame([{**field,"text":"600999"}],JUNHONG)
+        pending=[market,frame([field],JUNHONG),typed,typed];reads=[];actions=[]
+        async def capture(phase,options):
+            reads.append(phase);value=deepcopy(pending.pop(0) if pending else typed)
+            if "expected_frame_ref" in options:value["based_on_frame_ref"]=options["expected_frame_ref"]
+            return value
+        async def action(phase,op,options):actions.append((phase,op,options))
+        async def pause(seconds):pass
+        await Journey(JUNHONG,capture,action,pause,junhong_page="search").navigate()
+        self.assertEqual([a[0] for a in actions],["open_broker_public_search_once","enter_broker_public_symbol_once"])
+        self.assertEqual(actions[0][2]["frame_ref"],"original-market")
+        self.assertFalse(any(r.startswith(("broker_search_control","market_ready","public_market_tab")) for r in reads))
+
+    async def test_broker_quote_route_only_opens_verified_stock_row(self):
+        search=frame([node(package=JUNHONG,text=value,bounds="[100,348][230,388]" if key != "et_input_edit" else "[178,73][538,113]",**{"resource-id":JUNHONG+":id/"+key})
+               for key,value in {"et_input_edit":"600999","tv_stock_code":"600999","tv_stock_name":"招商证券","tv_stock_market":"沪A"}.items()]
+               +[node(package=JUNHONG,bounds="[0,318][720,432]",**{"class":"android.widget.LinearLayout"})],JUNHONG)
+        quote=frame([node(package=JUNHONG,text=t) for t in ("600999","招商证券","分时")],JUNHONG)
+        pending=[search,search,quote];actions=[]
+        async def capture(phase,options):
+            result=deepcopy(pending.pop(0) if pending else quote)
+            if "expected_frame_ref" in options:result["based_on_frame_ref"]=options["expected_frame_ref"]
+            return result
+        async def action(phase,op,options):actions.append((phase,op))
+        async def pause(seconds):pass
+        await Journey(JUNHONG,capture,action,pause,junhong_page="result").navigate()
+        self.assertEqual(actions,[("open_broker_quote_once","android.tap")])
 
     async def scenario(self, *, notice=False, failed_action=None, changed_pair=False):
         pending, actions, reads = sequence(notice), [], []

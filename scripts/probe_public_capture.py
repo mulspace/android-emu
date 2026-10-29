@@ -11,6 +11,8 @@ import sys
 import time
 import uuid
 
+from trace_native_start import traced_session_type
+
 
 def owned_run(path, serial, proc_root=Path('/proc')):
     receipt = json.loads((path / "started.json").read_text())
@@ -86,7 +88,8 @@ async def probe(args):
                 "expires_at": (datetime.now(UTC) + timedelta(seconds=280)).isoformat()}
             receipt["nonce"] = context["nonce"]
             phase = "native_start"
-            session = NativeSession(transport, context, [args.package])
+            traced = traced_session_type(NativeSession, event)
+            session = traced(transport, context, [args.package])
             await session.start(context)
             event({"phase": phase, "ok": True, "seconds": round(time.monotonic() - started, 3)})
             async def capture_snapshot(name, options, previous=None):

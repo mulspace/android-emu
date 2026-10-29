@@ -96,3 +96,84 @@ acceptance gate.
 
 Production Stock tasks must remain on their existing binding until both public
 navigation and managed complete-account capture pass.
+
+## Explicit Junhong public-page probes
+
+The default Junhong route remains the public market page. The optional
+`--junhong-page` values are narrowly scoped:
+
+- `search`: open the verified search control and enter public symbol 600999 once.
+- `result`: require two identical observations of the exact 600999 / 招商证券 /
+  沪A stock row and open it once; never press the adjacent add-watchlist icon.
+- `quote`: inspect the already-open 600999 quote page. Only the fully matched
+  first-use 五档/分时位置 layout prompt may be cancelled; unknown dialogs stop.
+
+The quote-page gate requires the actual symbol, company name and 分时 label.
+All successful routes still require three original-frame-bound image pairs;
+none opens 交易, reads credentials, submits an order or verifies account assets.
+A successful `search` receipt is search-page evidence, not a quote/account pass.
+
+Navigation reuses its most recent verified market observation when the search
+control is already present. It retains that original `frame_ref` for the usual
+native action guard. If the public market is already selected, it does not
+retap the bottom navigation or select the same market tab again. A missing
+selector still requires bounded read-only readiness observations; native errors
+terminate the session without replaying actions.
+
+`trace_native_start.py` reports transport preparation, native-ready wait and
+configuration reply durations without logging request/response bodies, identity
+values or exceptions. It restores the wrapped transport on failure and
+cancellation. The private bridge also timestamps fixed initialization phases.
+These diagnostics do not change input, startup or lease deadlines.
+
+### Startup and public-search results, 2026-10-29
+
+Bridge SHA-256:
+`bda4aadbd1f40469bd28879b8e8ba3810c22d06dde03460d7a7039fcb5b1804d`.
+This build adds numeric startup tracing to the prior single-pass / 1000 ms
+intra-request pause experiment. The unproven stable-child-recovery option was
+not enabled. No emulator, App, signature or screenshot acceptance rule changed.
+
+Five native starts completed in this run. Transport preparation took
+8.910-13.416 seconds; native-ready waits took 4.737-5.965 seconds; configuration
+replies took 49-64 ms. The previous intermittent initialization timeout did not
+recur, so these measurements do **not** prove its cause or resolution. The fixed
+native phase logs make a future recurrence distinguishable from page capture.
+
+| Probe | Outcome | Total including cleanup |
+| --- | --- | ---: |
+| Search route before eliminating redundant market reads | Missing child on extra search-control observation; no search action attempted | 92.168 s |
+| Reuse current selected market frame, then public 600999 search | Passed all three bound-image pairs | 66.557 s |
+| Open verified stock result | Result tapped once; stopped at first-use layout prompt | 77.725 s |
+| Read-only inspection of that exact layout prompt | One bound-image pair passed | 44.819 s |
+| Cancel only that known prompt, then capture the stock quote | Quote identity/readiness passed; first image RPC hit 30-second deadline | 111.962 s |
+
+The successful search images took 2.268, 2.716 and 2.421 seconds. Visual review
+confirmed the official 600999 / 招商证券 / 沪A result, and the unchanged backend
+accepted all six read/image receipts offline. This is a warm search-page result,
+not a cold-start timing comparison, complete quote capture or account acceptance.
+The test did not add the stock to a watchlist.
+
+The layout prompt was separately inspected before any dismissal. It offered
+五档在右边 / 五档在下边 with an explicit 取消 button. Only that full known layout
+is permitted; the diagnostic cancelled it once and did not press confirmation,
+buy, sell or cancel-order controls.
+
+After dismissal, the actual quote tree contained 327 nodes. Its consecutive
+single-pass walks took 18.745, 14.933 and 25.078 seconds. The stock identity and
+分时 view were found, but the first checked-image request timed out at 30.030
+seconds. No image from that timed-out request is accepted. A longer read-only
+comparison remains unverified; do not describe the quote page as stable merely
+because the simpler search page passed.
+
+All five native sessions confirmed cleanup. The retained crash buffer was
+empty and the event log had no crash or ANR events. The explicit emulator stop
+ended the runner after 1195.22 seconds with exit -10; its owned PID was absent
+and ports 5576/5577 were free. P30, production bindings, Apps and Scheduler were
+untouched. Sixty repository tests passed.
+
+Authenticated account acceptance remains blocked by the missing trusted
+managed entry: the host's `/v1/auth/me` still returns 401 and this desktop
+provides no managed App tool. Existing broker-login permission is preserved,
+but cannot replace authenticated tenant/workgroup context. Complete funds and
+holdings must be validated through that entry before any Stock cutover.
