@@ -223,3 +223,6 @@ rtk proxy timeout --signal=TERM --kill-after=10s 120s \
 It validates the exact guest, changes only volatile foreground/top-app CPU sets
 and restores ordinary ADB shell before App testing. It is not enabled on production resources and does not make the
 emulator ready for account collection.
+
+See [the four-CPU and compilation follow-up](docs/cpu-allocation-followup.md) for
+the remaining startup/capture failures and the changed private TDX compilation baseline.

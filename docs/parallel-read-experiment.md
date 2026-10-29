@@ -1,5 +1,7 @@
 # Bounded parallel accessibility reads
 
+See the [four-CPU and compilation follow-up](cpu-allocation-followup.md) for the next independent tests.
+
 This opt-in Android 7 diagnostic changes only the private observation JAR in the
 owned emulator. It does not edit Kengent source, official Apps, account policy,
 production bindings, Scheduler, services or P30.
