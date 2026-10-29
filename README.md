@@ -17,8 +17,11 @@ repeatability, authenticated funds/holdings capture and production cutover are
 **not** established. An opt-in [read-only public quote contract](docs/read-only-quote-contract.md)
 now passes three Junhong quote captures and rejects input authority, but cold
 startup and production Stock acceptance remain unfinished. See also the
+[TDX transition comparison](docs/tdx-window-transition.md): three public day-K
+journeys and nine bound images passed, while the optional wait showed no
+repeatable speedup. Earlier evidence is in the
 [readiness investigation](docs/native-ready-window.md) and
-[earlier public-page results](docs/public-journey-validation.md).
+[public-page results](docs/public-journey-validation.md).
 
 The public `emu-30-release` manifest is the initial build baseline. Its pinned
 source is **not claimed to be the exact source of build 7196367**. Each binary's

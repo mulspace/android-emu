@@ -9,6 +9,7 @@ import shutil
 import sys
 from unittest.mock import patch
 from quote_read_probe import instrument_quote_read
+from window_quiet_probe import instrument_window_quiet
 
 def instrument(source):
     """Strict anchors: refuse source drift instead of changing snapshot checks."""
@@ -178,6 +179,7 @@ def main():
     parser.add_argument("--kengent-root", type=Path, required=True)
     parser.add_argument("--sdk-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--settle-windows", action="store_true", help="Opt-in bounded TDX window-transition scheduling before full capture")
     parser.add_argument("--read-only-quote", action="store_true", help="Opt-in public Junhong quote capture; cannot authorize physical input")
     parser.add_argument("--single-pass", action="store_true", help="Experimental complete tree/sensitivity traversal; not a production build")
     parser.add_argument("--prefetch-siblings", action="store_true", help="API-24 diagnostic: framework sibling prefetch, preserving complete traversal")
@@ -247,6 +249,10 @@ def main():
         raise ValueError("Mismatch logger source anchor changed")
     instrumented = instrumented.replace(anchor, anchor + '            android.util.Log.i("EmuObservation", "mismatch " + error.diagnostic);\n')
     instrumented = hierarchy_retry_delay(instrumented, args.hierarchy_retry_delay_ms)
+    if args.settle_windows:
+        instrumented = instrument_window_quiet(instrumented)
+        for name in ("WindowQuiet.java", "AndroidWindowQuiet.java"):
+            shutil.copyfile(args.experimental_source / name, copied / name)
     if args.read_only_quote:
         instrumented = instrument_quote_read(instrumented)
         shutil.copyfile(args.experimental_source / "ReadOnlyQuote.java", copied / "ReadOnlyQuote.java")
@@ -260,6 +266,7 @@ def main():
     shutil.copyfile(bridge, args.output / "bridge.jar")
     receipt = {"diagnostic_only": True, "device_operations": False, "experimental_single_pass": args.single_pass,
                "experimental_read_only_quote": args.read_only_quote,
+               "experimental_window_quiet": args.settle_windows,
                "experimental_checked_retry": args.retry_incomplete_checked,
                "numeric_hierarchy_timing": args.single_pass,
                "experimental_sibling_prefetch": args.prefetch_siblings,

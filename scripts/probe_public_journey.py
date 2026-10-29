@@ -118,11 +118,14 @@ def broker_quote_ready(items):
 
 
 class Journey:
-    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market", tdx_page="market", read_only_quote=False):
+    def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market", tdx_page="market", read_only_quote=False, settle_windows=False):
         self.package, self.capture, self.action, self.pause = package, capture, action, pause
         self.junhong_page = junhong_page
         self.tdx_page = tdx_page
         self.read_only_quote = read_only_quote
+        self.settle_windows = settle_windows
+        if settle_windows and package != TDX:
+            raise ValueError("Window settle diagnostic requires TDX")
         if read_only_quote and (package != JUNHONG or junhong_page not in ("quote", "search-quote", "result")):
             raise ValueError("Read-only quote requires a verified Junhong quote route")
         if tdx_page not in ("market", "quote") or (tdx_page != "market" and package != TDX):
@@ -135,7 +138,10 @@ class Journey:
         for attempt in range(8):
             # A native error ends its session. Recovery belongs inside that
             # original native request; never send another RPC after failure.
-            frame = await self.capture(f"{phase}_{attempt+1}", {"include_image": False, "include_xml": True})
+            options = {"include_image": False, "include_xml": True}
+            if self.settle_windows and phase == "chart_ready" and attempt == 0:
+                options["wait_window_quiet"] = "tdx-chart-v1"
+            frame = await self.capture(f"{phase}_{attempt+1}", options)
             chosen = selector(nodes(frame, self.package))
             if chosen is not None and (not stable or chosen == previous):
                 return frame, chosen
@@ -258,6 +264,10 @@ async def probe(args):
         build = json.loads((args.artifacts / "build.json").read_text())
         if build.get("experimental_read_only_quote") is not True or build.get("bridge_sha256") != hashlib.sha256((args.artifacts / "bridge.jar").read_bytes()).hexdigest():
             raise ValueError("Audited read-only quote bridge is required")
+    if args.settle_windows:
+        build = json.loads((args.artifacts / "build.json").read_text())
+        if build.get("experimental_window_quiet") is not True or build.get("bridge_sha256") != hashlib.sha256((args.artifacts / "bridge.jar").read_bytes()).hexdigest():
+            raise ValueError("Audited window settle bridge is required")
     args.output.mkdir(mode=0o700, parents=True, exist_ok=False)
     events = []
     receipt = {"started_at": datetime.now(UTC).isoformat(),
@@ -266,6 +276,7 @@ async def probe(args):
                "artifact_sha256": {name: hashlib.sha256((args.artifacts / name).read_bytes()).hexdigest()
                                    for name in ("u2.jar", "bridge.jar")},
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
+               "experimental_window_quiet": args.settle_windows,
                "duration_limit_seconds": args.seconds,
                "checked_capture": not args.read_only_quote, "read_only_quote_capture": args.read_only_quote, "events": events, "visual_review_required": True,
                "launch_mode": "prestarted" if args.prestarted else "native",
@@ -334,7 +345,8 @@ async def probe(args):
             if not args.prestarted:
                 await call("launch_app_once", "android.start_app", {"package": args.package})
             last = await Journey(args.package, capture, call, junhong_page=args.junhong_page,
-                tdx_page=args.tdx_page, read_only_quote=args.read_only_quote).navigate()
+                tdx_page=args.tdx_page, read_only_quote=args.read_only_quote,
+                settle_windows=args.settle_windows).navigate()
             if args.read_only_quote:
                 phase = "read_only_input_denial"
                 owned_run(args.run_dir, args.serial)
@@ -368,6 +380,7 @@ def main():
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
     parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote", "search-quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, current quote, or complete search-quote")
     parser.add_argument("--tdx-page", choices=("market", "quote"), default="market", help="Start from the market page or a previously verified open public quote; never repeat uncertain navigation")
+    parser.add_argument("--settle-windows", action="store_true", help="Wait for window geometry to settle only before TDX chart entry; unchanged RPC deadline")
     parser.add_argument("--read-only-quote", action="store_true", help="Public Junhong quote evidence with dynamic numeric values; never input authority")
     parser.add_argument("--native-ready-seconds", type=int, choices=(10, 30), default=10,
                         help="Opt-in startup wait comparison, bounded by the original lease; no input/capture changes")
@@ -377,6 +390,8 @@ def main():
     parser.add_argument("--seconds", type=int, choices=(180, 300, 600), default=600,
                         help="Whole journey deadline, followed by bounded session cleanup")
     args = parser.parse_args()
+    if args.settle_windows and args.package != TDX:
+        parser.error("Window settle diagnostic requires TDX")
     if args.read_only_quote and (args.package != JUNHONG or args.junhong_page not in ("quote", "search-quote", "result")):
         parser.error("Read-only quote requires a verified Junhong quote route")
     if args.junhong_page != "market" and args.package != JUNHONG:
