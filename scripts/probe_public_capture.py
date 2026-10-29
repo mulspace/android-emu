@@ -13,6 +13,7 @@ import time
 import uuid
 
 from trace_native_start import traced_session_type
+from native_ready_probe import ready_session_type
 
 
 def owned_run(path, serial, proc_root=Path('/proc')):
@@ -94,7 +95,9 @@ async def probe(args):
                 "expires_at": (datetime.now(UTC) + timedelta(seconds=min(280, args.seconds + 40))).isoformat()}
             receipt["nonce"] = context["nonce"]
             phase = "native_start"
-            traced = traced_session_type(NativeSession, event)
+            candidate = ready_session_type(NativeSession, args.native_ready_seconds)
+            receipt["native_ready_probe"] = getattr(candidate, "ready_probe_info", {"native_ready_seconds": 10})
+            traced = traced_session_type(candidate, event)
             session = traced(transport, context, [args.package])
             await session.start(context)
             event({"phase": phase, "ok": True, "seconds": round(time.monotonic() - started, 3)})
@@ -168,6 +171,8 @@ def main():
     parser.add_argument("--count", type=int, choices=range(1, 7), default=3)
     parser.add_argument("--seconds", type=int, choices=(60, 120, 240), default=240,
                         help="Bound this read-only diagnostic before the emulator outer deadline")
+    parser.add_argument("--native-ready-seconds", type=int, choices=(10, 30), default=10,
+                        help="Opt-in startup wait comparison, bounded by the original lease; no input/capture changes")
     parser.add_argument("--checked", action="store_true", help="Observe XML then capture the exact same frame, as Stock does")
     args = parser.parse_args()
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))

@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from probe_public_capture import owned_run, validate_checked_pair
 
 from trace_native_start import traced_session_type
+from native_ready_probe import ready_session_type
 
 TDX = "com.tdx.AndroidNew"
 JUNHONG = "com.guotai.dazhihui"
@@ -273,7 +274,9 @@ async def probe(args):
                        "expires_at": min(deadline, datetime.now(UTC) + timedelta(seconds=280)).isoformat()}
             receipt["nonce"] = context["nonce"]
             phase = "native_start"
-            traced = traced_session_type(NativeSession, lambda value: event(**value))
+            candidate = ready_session_type(NativeSession, args.native_ready_seconds)
+            receipt["native_ready_probe"] = getattr(candidate, "ready_probe_info", {"native_ready_seconds": 10})
+            traced = traced_session_type(candidate, lambda value: event(**value))
             session = traced(transport, context, [args.package])
             await session.start(context)
             event(phase=phase, ok=True, seconds=round(time.monotonic()-started, 3))
@@ -340,6 +343,8 @@ def main():
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
     parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote", "search-quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, current quote, or complete search-quote")
     parser.add_argument("--tdx-page", choices=("market", "quote"), default="market", help="Start from the market page or a previously verified open public quote; never repeat uncertain navigation")
+    parser.add_argument("--native-ready-seconds", type=int, choices=(10, 30), default=10,
+                        help="Opt-in startup wait comparison, bounded by the original lease; no input/capture changes")
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")
