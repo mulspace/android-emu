@@ -113,3 +113,7 @@ reports no CLI authentication profile and has no connected managed App adapter.
 The user's broker-login authorization remains valid, but account verification
 requires the trusted platform ingress; raw credential files or a fabricated
 principal are not substitutes.
+
+The [managed acceptance handoff](managed-account-acceptance.md) clarifies the
+required authenticated ingress and exact read-only App operations. The older chat
+CLI login alone must not be treated as a ready tenant-app Context.
