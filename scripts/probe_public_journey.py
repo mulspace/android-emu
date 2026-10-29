@@ -16,6 +16,7 @@ import uuid
 import xml.etree.ElementTree as ET
 
 from probe_public_capture import owned_run, validate_checked_pair
+from transition_read_budget import call_with_transition_budget
 
 from trace_native_start import traced_session_type
 from native_ready_probe import ready_session_type
@@ -276,6 +277,7 @@ async def probe(args):
                "artifact_sha256": {name: hashlib.sha256((args.artifacts / name).read_bytes()).hexdigest()
                                    for name in ("u2.jar", "bridge.jar")},
                "diagnostic_snapshot_timeout_seconds": args.snapshot_seconds,
+               "quote_entry_seconds": args.quote_entry_seconds,
                "experimental_window_quiet": args.settle_windows,
                "duration_limit_seconds": args.seconds,
                "checked_capture": not args.read_only_quote, "read_only_quote_capture": args.read_only_quote, "events": events, "visual_review_required": True,
@@ -323,7 +325,8 @@ async def probe(args):
                 (args.output / f"{name}.request.json").write_text(json.dumps(options) + "\n")
                 attempts[name] = attempts.get(name, 0) + 1
                 try:
-                    raw = await session.call(operation, {"arguments": options})
+                    raw = await call_with_transition_budget(session, operation,
+                        {"arguments": options}, phase=name, seconds=args.quote_entry_seconds)
                 except Exception as error:
                     event(phase=name, attempt=attempts[name], ok=False,
                           seconds=round(time.monotonic()-tick, 3), type=type(error).__name__,
@@ -384,6 +387,8 @@ def main():
     parser.add_argument("--read-only-quote", action="store_true", help="Public Junhong quote evidence with dynamic numeric values; never input authority")
     parser.add_argument("--native-ready-seconds", type=int, choices=(10, 30), default=10,
                         help="Opt-in startup wait comparison, bounded by the original lease; no input/capture changes")
+    parser.add_argument("--quote-entry-seconds", type=int, choices=(45, 90),
+                        help="Diagnostic budget only for the first Junhong XML quote-entry read; all later reads stay at 30 seconds")
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")
@@ -398,6 +403,8 @@ def main():
         parser.error("Junhong public routes require Junhong")
     if args.tdx_page != "market" and args.package != TDX:
         parser.error("TDX public routes require TDX")
+    if args.quote_entry_seconds is not None and (args.package != JUNHONG or args.junhong_page != "search-quote" or args.snapshot_seconds != 30):
+        parser.error("Quote-entry budget requires the explicit Junhong search-quote route and 30-second later reads")
     sys.path.insert(0, str(args.kengent_root.resolve() / "src"))
     os.umask(0o077)
     async def run():
