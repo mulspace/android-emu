@@ -118,7 +118,7 @@ class Journey:
     def __init__(self, package, capture, action, pause=asyncio.sleep, *, junhong_page="market"):
         self.package, self.capture, self.action, self.pause = package, capture, action, pause
         self.junhong_page = junhong_page
-        if junhong_page not in ("market", "search", "result", "quote") or (junhong_page != "market" and package != JUNHONG):
+        if junhong_page not in ("market", "search", "result", "quote", "search-quote") or (junhong_page != "market" and package != JUNHONG):
             raise ValueError("Invalid Junhong public route")
 
     async def wait(self, phase, selector, *, stable=False):
@@ -138,15 +138,19 @@ class Journey:
     async def tap(self, phase, frame, chosen):
         await self.action(phase, "android.tap", center(frame, chosen))
 
+    async def quote_entry(self):
+        # A known modal takes priority even if the stock title is visible behind it.
+        frame, chosen = await self.wait("broker_quote_entry", lambda ns: broker_layout_cancel(ns) or broker_quote_ready(ns))
+        if chosen.get("resource-id") == JUNHONG + ":id/tv_cancel":
+            await self.tap("cancel_known_quote_layout_once", frame, chosen)
+            await self.wait("broker_quote_ready", broker_quote_ready)
+
     async def navigate(self):
         if self.junhong_page in ("result", "quote"):
             if self.junhong_page == "result":
                 frame, chosen = await self.wait("broker_known_result", broker_result, stable=True)
                 await self.tap("open_broker_quote_once", frame, chosen)
-            frame, chosen = await self.wait("broker_quote_entry", lambda ns: broker_quote_ready(ns) or broker_layout_cancel(ns))
-            if chosen.get("resource-id") == JUNHONG + ":id/tv_cancel":
-                await self.tap("cancel_known_quote_layout_once", frame, chosen)
-                await self.wait("broker_quote_ready", broker_quote_ready)
+            await self.quote_entry()
         elif self.package == JUNHONG:
             def market_tab(ns):
                 return unique(ns, lambda n: n.get("resource-id") == JUNHONG + ":id/tv_free_stock_market"
@@ -165,7 +169,7 @@ class Journey:
                     current = market_tab(ns)
                     return current if current and current.get("selected") == "true" else None
                 frame, _ = await self.wait("market_ready", selected_market)
-            if self.junhong_page == "search":
+            if self.junhong_page in ("search", "search-quote"):
                 def search_control(ns):
                     return unique(ns, lambda n: n.get("resource-id") == JUNHONG + ":id/title_search"
                         and n.get("class") == "android.widget.RelativeLayout"
@@ -188,6 +192,10 @@ class Journey:
                     field = broker_field(ns)
                     return field if field and field.get("text") == "600999" else None
                 await self.wait("broker_symbol_readback", symbol_readback, stable=True)
+                if self.junhong_page == "search-quote":
+                    frame, chosen = await self.wait("broker_known_result", broker_result, stable=True)
+                    await self.tap("open_broker_quote_once", frame, chosen)
+                    await self.quote_entry()
         elif self.package == TDX:
             frame, chosen = await self.wait("market_ready", tdx_search)
             await self.tap("open_search_once", frame, chosen)
@@ -323,7 +331,7 @@ def main():
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--serial", choices=("emulator-5576",), default="emulator-5576")
     parser.add_argument("--package", choices=(TDX, JUNHONG), required=True)
-    parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, or current 600999 quote")
+    parser.add_argument("--junhong-page", choices=("market", "search", "result", "quote", "search-quote"), default="market", help="Explicit public journey: market, 600999 search, verified result, current quote, or complete search-quote")
     parser.add_argument("--prestarted", action="store_true", help="Use an explicitly prestarted public App; do not repeat its launch")
     parser.add_argument("--snapshot-seconds", type=int, choices=(30, 90), default=30,
                         help="Diagnostic read-only deadline comparison, never a production setting")

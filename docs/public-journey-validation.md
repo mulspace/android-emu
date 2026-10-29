@@ -105,6 +105,8 @@ The default Junhong route remains the public market page. The optional
 - `search`: open the verified search control and enter public symbol 600999 once.
 - `result`: require two identical observations of the exact 600999 / 招商证券 /
   沪A stock row and open it once; never press the adjacent add-watchlist icon.
+- `search-quote`: perform the market, public search, verified stock-row and quote
+  steps in one native session, then check three image pairs on the quote page.
 - `quote`: inspect the already-open 600999 quote page. Only the fully matched
   first-use 五档/分时位置 layout prompt may be cancelled; unknown dialogs stop.
 

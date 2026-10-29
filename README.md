@@ -196,3 +196,7 @@ See [snapshot diagnostics and the single-pass experiment](docs/snapshot-observat
 for reproducible no-GDB comparisons, numeric observation timing and the
 experimental complete single traversal. These are isolated tests, not a
 production capture or account authorization change.
+
+See [the quote traversal experiment](docs/quote-prefetch-experiment.md) for the
+measured child-lookup bottleneck and the opt-in API-24 sibling-prefetch candidate.
+It preserves full traversal and snapshot guards; it is not a production default.

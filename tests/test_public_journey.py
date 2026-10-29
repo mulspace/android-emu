@@ -187,6 +187,55 @@ class Navigation(unittest.IsolatedAsyncioTestCase):
         await Journey(JUNHONG,capture,action,pause,junhong_page="result").navigate()
         self.assertEqual(actions,[("open_broker_quote_once","android.tap")])
 
+    async def test_complete_broker_quote_route_keeps_single_session_and_one_shot_input(self):
+        for fail_tap in (False, True):
+            with self.subTest(fail_tap=fail_tap):
+                home = frame([
+                    node(package=JUNHONG,text="行情",clickable="false",**{"resource-id":JUNHONG+":id/btm_text2"}),
+                    node(package=JUNHONG,**{"resource-id":JUNHONG+":id/bottom_menu_button2"}),
+                    node(package=JUNHONG,text="行情",selected="true",**{"resource-id":JUNHONG+":id/tv_free_stock_market"}),
+                    node(package=JUNHONG,**{"resource-id":JUNHONG+":id/title_search","class":"android.widget.RelativeLayout","bounds":"[640,56][688,128]"})],JUNHONG)
+                field=node(package=JUNHONG,text="",focused="true",password="false",**{"class":"android.widget.EditText"})
+                typed=frame([{**field,"text":"600999"}],JUNHONG)
+                result=frame([node(package=JUNHONG,text=value,bounds="[100,348][230,388]" if key != "et_input_edit" else "[178,73][538,113]",**{"resource-id":JUNHONG+":id/"+key})
+                    for key,value in {"et_input_edit":"600999","tv_stock_code":"600999","tv_stock_name":"招商证券","tv_stock_market":"沪A"}.items()]
+                    +[node(package=JUNHONG,bounds="[0,318][720,432]",**{"class":"android.widget.LinearLayout"})],JUNHONG)
+                quote=frame([node(package=JUNHONG,text=t) for t in ("600999","招商证券","分时")],JUNHONG)
+                pending=[home,frame([field],JUNHONG),typed,typed,result,result,quote]
+                reads=[];actions=[]
+                async def capture(phase,options):
+                    reads.append(phase);value=deepcopy(pending.pop(0) if pending else quote)
+                    if "expected_frame_ref" in options:value["based_on_frame_ref"]=options["expected_frame_ref"]
+                    return value
+                async def action(phase,op,options):
+                    actions.append(phase)
+                    if fail_tap and phase == "open_broker_quote_once":raise TimeoutError("uncertain input")
+                async def pause(seconds):pass
+                journey=Journey(JUNHONG,capture,action,pause,junhong_page="search-quote")
+                if fail_tap:
+                    with self.assertRaises(TimeoutError):await journey.navigate()
+                    self.assertNotIn("broker_quote_entry_1",reads)
+                    self.assertFalse(any(r.endswith("_checked") for r in reads))
+                else:
+                    await journey.navigate()
+                    self.assertEqual(sum(r.endswith("_checked") for r in reads),3)
+                self.assertEqual(actions,["open_broker_public_search_once","enter_broker_public_symbol_once","open_broker_quote_once"])
+
+    async def test_known_layout_dialog_takes_priority_over_underlying_quote(self):
+        quote=frame([node(package=JUNHONG,text=t) for t in ("600999","招商证券","分时")],JUNHONG)
+        labels={"tv_right":"五档在右边","tv_below":"五档在下边","tv_five_level_remind":"您还可以到“我的-设置-行情设置”里进行切换"}
+        modal=frame([node(package=JUNHONG,text=t) for t in ("600999","招商证券","分时","五档/分时位置自由选择")]
+            +[node(package=JUNHONG,text=v,**{"resource-id":JUNHONG+":id/"+k}) for k,v in labels.items()]
+            +[node(package=JUNHONG,text="取消",bounds="[40,977][359,1067]",**{"resource-id":JUNHONG+":id/tv_cancel"})],JUNHONG)
+        pending=[modal,quote];actions=[]
+        async def capture(phase,options):
+            value=deepcopy(pending.pop(0) if pending else quote)
+            if "expected_frame_ref" in options:value["based_on_frame_ref"]=options["expected_frame_ref"]
+            return value
+        async def action(phase,op,options):actions.append(phase)
+        await Journey(JUNHONG,capture,action,junhong_page="quote").navigate()
+        self.assertEqual(actions,["cancel_known_quote_layout_once"])
+
     async def scenario(self, *, notice=False, failed_action=None, changed_pair=False):
         pending, actions, reads = sequence(notice), [], []
         last = frame(chart())

@@ -146,6 +146,7 @@ def main():
     parser.add_argument("--sdk-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--single-pass", action="store_true", help="Experimental complete tree/sensitivity traversal; not a production build")
+    parser.add_argument("--prefetch-siblings", action="store_true", help="API-24 diagnostic: framework sibling prefetch, preserving complete traversal")
     parser.add_argument("--recover-stable-child", action="store_true", help="Diagnostic: one missing-child read after an identical parent refresh; requires single-pass")
     parser.add_argument("--retry-incomplete-checked", action="store_true", help="Diagnostic: retry missing nodes at most three times without changing the expected frame")
     parser.add_argument("--hierarchy-retry-delay-ms", type=int, choices=(25, 250, 1000), default=25,
@@ -154,6 +155,8 @@ def main():
     args = parser.parse_args()
     if args.recover_stable_child and not args.single_pass:
         parser.error("--recover-stable-child requires --single-pass")
+    if args.prefetch_siblings and not args.single_pass:
+        parser.error("--prefetch-siblings requires --single-pass")
     os.umask(0o077)
     args.output.mkdir(parents=True, exist_ok=False)
     sys.path.insert(0, str(args.kengent_root / "src"))
@@ -182,6 +185,13 @@ def main():
         hierarchy = copied / "AndroidHierarchy.java"
         hierarchy.write_text(recover_stable_child(hierarchy.read_text()))
         shutil.copyfile(args.experimental_source / "StableChildRecovery.java", copied / "StableChildRecovery.java")
+    if args.prefetch_siblings:
+        hierarchy=copied / "AndroidHierarchy.java"
+        body=hierarchy.read_text()
+        if body.count("node.getChild(index)") != (2 if args.recover_stable_child else 1):
+            raise ValueError("Sibling prefetch source anchor changed")
+        hierarchy.write_text(body.replace("node.getChild(index)","SiblingPrefetch.child(node,index)"))
+        shutil.copyfile(args.experimental_source / "SiblingPrefetch.java",copied / "SiblingPrefetch.java")
     if args.retry_incomplete_checked:
         checks = copied / "SnapshotCapture.java"
         checks.write_text(retry_incomplete_checked(checks.read_text()))
@@ -203,6 +213,8 @@ def main():
     shutil.copyfile(bridge, args.output / "bridge.jar")
     receipt = {"diagnostic_only": True, "device_operations": False, "experimental_single_pass": args.single_pass,
                "experimental_checked_retry": args.retry_incomplete_checked,
+               "numeric_hierarchy_timing": args.single_pass,
+               "experimental_sibling_prefetch": args.prefetch_siblings,
                "experimental_stable_child_recovery": args.recover_stable_child,
                "hierarchy_retry_delay_ms": args.hierarchy_retry_delay_ms, "numeric_mismatch_diagnostics": True, "numeric_startup_diagnostics": True, "source_hashes": before,
                "built_source_hashes": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in copied.glob("*.java")},

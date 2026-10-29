@@ -17,6 +17,26 @@ import org.json.JSONObject;
 /** Isolated experiment: preserve all windows and scan even invisible descendants. */
 public final class AndroidHierarchy {
     private AndroidHierarchy() {}
+    // Per-capture numeric timings only: never log UI text, IDs or bounds.
+    private static final ThreadLocal<Timing> TIMING = new ThreadLocal<>();
+    private static final class Timing {
+        final long started=System.nanoTime();
+        long rootNs,windowNs,childNs,attributeNs,maxChildNs;
+        int childCalls,slowChildCalls,attributeCalls;
+        boolean complete;
+        void child(long elapsed) {
+            childCalls++;childNs+=elapsed;maxChildNs=Math.max(maxChildNs,elapsed);
+            if(elapsed>=100000000L)slowChildCalls++;
+        }
+        void report() {
+            android.util.Log.i("EmuHierarchyTiming", "complete=" + (complete?1:0)
+                + " total_ms=" + (System.nanoTime()-started)/1000000L
+                + " root_ms=" + rootNs/1000000L + " windows_ms=" + windowNs/1000000L
+                + " child_calls=" + childCalls + " child_ms=" + childNs/1000000L
+                + " max_child_ms=" + maxChildNs/1000000L + " slow_child_calls=" + slowChildCalls
+                + " attribute_calls=" + attributeCalls + " attribute_ms=" + attributeNs/1000000L);
+        }
+    }
     public static final class Result {
         public final String xml;
         public final int nodes;
@@ -42,6 +62,11 @@ public final class AndroidHierarchy {
         public int inputType(){return node.getInputType();}
         public int childCount(){return node.getChildCount();}
         public SinglePassHierarchy.Node child(int index){
+            long tick=System.nanoTime();
+            try { return readChild(index); }
+            finally { Timing timing=TIMING.get();if(timing!=null)timing.child(System.nanoTime()-tick); }
+        }
+        private SinglePassHierarchy.Node readChild(int index){
             AccessibilityNodeInfo child=node.getChild(index);
             if(child==null) {
                 int before=node.getChildCount();
@@ -56,6 +81,14 @@ public final class AndroidHierarchy {
         }
         public void recycle(){node.recycle();}
         public Map<String,String> attributes(){
+            long tick=System.nanoTime();
+            try { return readAttributes(); }
+            finally {
+                Timing timing=TIMING.get();
+                if(timing!=null){timing.attributeCalls++;timing.attributeNs+=System.nanoTime()-tick;}
+            }
+        }
+        private Map<String,String> readAttributes(){
             Map<String,String> out=new LinkedHashMap<>();
             out.put("text",text(node.getText()));out.put("resource-id",text(node.getViewIdResourceName()));
             out.put("class",text(node.getClassName()));out.put("package",text(node.getPackageName()));
@@ -79,18 +112,28 @@ public final class AndroidHierarchy {
                                  SinglePassHierarchy.Check check)throws Exception {
         Set<AccessibilityNodeInfo> owned=new LinkedHashSet<>();
         List<AccessibilityWindowInfo> windows=null;
+        Timing timing=new Timing(), previous=TIMING.get();
+        TIMING.set(timing);
         try {
             check.alive();
-            AccessibilityNodeInfo active=automation.getRootInActiveWindow();
+            long tick=System.nanoTime();
+            AccessibilityNodeInfo active;
+            try { active=automation.getRootInActiveWindow(); }
+            finally { timing.rootNs+=System.nanoTime()-tick; }
             if(active==null) {
                 android.util.Log.i("EmuObservation", "incomplete_active_root");
                 throw new SnapshotCapture.IncompleteHierarchy();
             }
             owned.add(active);
-            windows=automation.getWindows();
+            tick=System.nanoTime();
+            try { windows=automation.getWindows(); }
+            finally { timing.windowNs+=System.nanoTime()-tick; }
             if(windows!=null)for(AccessibilityWindowInfo window:windows) {
                 check.alive();
-                AccessibilityNodeInfo root=window.getRoot();
+                tick=System.nanoTime();
+                AccessibilityNodeInfo root;
+                try { root=window.getRoot(); }
+                finally { timing.rootNs+=System.nanoTime()-tick; }
                 if(root==null) {
                     android.util.Log.i("EmuObservation", "incomplete_window_root type=" + window.getType()
                         + " active=" + window.isActive() + " focused=" + window.isFocused());
@@ -103,14 +146,21 @@ public final class AndroidHierarchy {
             }
             List<SinglePassHierarchy.Node> roots=new ArrayList<>();
             for(AccessibilityNodeInfo root:owned)roots.add(new Node(root,width,height));
-            return new Result(SinglePassHierarchy.capture(roots,rotation,check));
+            Result result=new Result(SinglePassHierarchy.capture(roots,rotation,check));
+            timing.complete=true;
+            return result;
         } catch(SinglePassHierarchy.IncompleteHierarchy error) {
             android.util.Log.i("EmuObservation", "incomplete_child depth=" + error.depth
                 + " index=" + error.index + " visited=" + error.visited);
             throw new SnapshotCapture.IncompleteHierarchy();
         } finally {
-            for(AccessibilityNodeInfo root:owned)root.recycle();
-            if(windows!=null)for(AccessibilityWindowInfo window:windows)window.recycle();
+            try {
+                for(AccessibilityNodeInfo root:owned)root.recycle();
+                if(windows!=null)for(AccessibilityWindowInfo window:windows)window.recycle();
+            } finally {
+                if(previous==null)TIMING.remove();else TIMING.set(previous);
+                timing.report();
+            }
         }
     }
 }
