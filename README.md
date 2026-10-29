@@ -12,10 +12,10 @@ capture with unmodified Junhong/TongdaXin ARM32 APKs. The latest
 [missing-node investigation](docs/incomplete-hierarchy-diagnostics.md) records
 failed repeatability checks and an opt-in, identity-preserving recovery probe. TongdaXin public daily
 candles and three strictly paired Junhong public-search captures have passed
-on the isolated test device. Junhong quote-page capture still exceeds the
-30-second read deadline; startup repeatability, authenticated funds/holdings
-capture and production cutover are **not** established. See the
-[latest public-page results](docs/public-journey-validation.md).
+on the isolated test device. Junhong quote-page capture still times out or rejects changing content; startup
+repeatability, authenticated funds/holdings capture and production cutover are
+**not** established. See the [latest host CPU and startup experiment](docs/host-headroom-experiment.md)
+and the [earlier public-page results](docs/public-journey-validation.md).
 
 The public `emu-30-release` manifest is the initial build baseline. Its pinned
 source is **not claimed to be the exact source of build 7196367**. Each binary's
@@ -226,3 +226,14 @@ emulator ready for account collection.
 
 See [the four-CPU and compilation follow-up](docs/cpu-allocation-followup.md) for
 the remaining startup/capture failures and the changed private TDX compilation baseline.
+
+## Owned emulator CPU sampling
+
+`scripts/sample_emulator_threads.py --run-dir RUN --output NEW_JSON --seconds 30`
+reads only the original, directly launched diagnostic emulator's thread scheduler
+counters. Sampling is bounded to 1-60 seconds, checks PID/start-time ownership on
+every interval and distinguishes thread-ID reuse. It issues no device commands.
+Missing endpoint intervals are excluded; disabled scheduler wait accounting is
+reported instead of interpreted as zero contention. Keep raw reports private.
+Requested launcher affinity can differ from a GPU driver's later thread affinity;
+use the reported per-thread masks when comparing runs.

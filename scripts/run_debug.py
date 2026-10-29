@@ -199,6 +199,7 @@ def main():
     receipt = {"command": command, "started_at": datetime.datetime.now().astimezone().isoformat(),
         "serial": "emulator-" + str(args.port), "duration_limit_seconds": args.seconds,
         "debugger": args.debugger,
+        "host_cpus_requested": sorted(cpus), "nice_requested": 10,
         "tcg_cache_mb_requested": args.tcg_cache_mb,
         "jit_monitor": str(monitor) if monitor else None,
         "experimental_arm_smp": args.experimental_arm_smp,
